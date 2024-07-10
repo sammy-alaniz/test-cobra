@@ -1,0 +1,5489 @@
+You:
+
+
+
+## Overview
+You are a code assistant that accepts a python source file, and a python test file.
+Your goal is to generate additional unit tests to complement the existing test suite, 
+in order to increase the code coverage against the source file.
+
+## Source File
+Here is the source file that you will be writing tests against, called args.go.
+Note that we have manually added line numbers for each line of code, to help you understand the code coverage report.
+Those numbers are not a part of the original code.
+=========
+1 // Copyright 2013-2023 The Cobra Authors
+2 //
+3 // Licensed under the Apache License, Version 2.0 (the "License");
+4 // you may not use this file except in compliance with the License.
+5 // You may obtain a copy of the License at
+6 //
+7 //      http://www.apache.org/licenses/LICENSE-2.0
+8 //
+9 // Unless required by applicable law or agreed to in writing, software
+10 // distributed under the License is distributed on an "AS IS" BASIS,
+11 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12 // See the License for the specific language governing permissions and
+13 // limitations under the License.
+14 
+15 package cobra
+16 
+17 import (
+18 	"fmt"
+19 	"strings"
+20 )
+21 
+22 type PositionalArgs func(cmd *Command, args []string) error
+23 
+24 // legacyArgs validation has the following behaviour:
+25 // - root commands with no subcommands can take arbitrary arguments
+26 // - root commands with subcommands will do subcommand validity checking
+27 // - subcommands will always accept arbitrary arguments
+28 func legacyArgs(cmd *Command, args []string) error {
+29 	// no subcommand, always take args
+30 	if !cmd.HasSubCommands() {
+31 		return nil
+32 	}
+33 
+34 	// root command with subcommands, do subcommand checking.
+35 	if !cmd.HasParent() && len(args) > 0 {
+36 		return fmt.Errorf("unknown command %q for %q%s", args[0], cmd.CommandPath(), cmd.findSuggestions(args[0]))
+37 	}
+38 	return nil
+39 }
+40 
+41 // NoArgs returns an error if any args are included.
+42 func NoArgs(cmd *Command, args []string) error {
+43 	if len(args) > 0 {
+44 		return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+45 	}
+46 	return nil
+47 }
+48 
+49 // OnlyValidArgs returns an error if there are any positional args that are not in
+50 // the ValidArgs field of Command
+51 func OnlyValidArgs(cmd *Command, args []string) error {
+52 	if len(cmd.ValidArgs) > 0 {
+53 		// Remove any description that may be included in ValidArgs.
+54 		// A description is following a tab character.
+55 		validArgs := make([]string, 0, len(cmd.ValidArgs))
+56 		for _, v := range cmd.ValidArgs {
+57 			validArgs = append(validArgs, strings.SplitN(v, "\t", 2)[0])
+58 		}
+59 		for _, v := range args {
+60 			if !stringInSlice(v, validArgs) {
+61 				return fmt.Errorf("invalid argument %q for %q%s", v, cmd.CommandPath(), cmd.findSuggestions(args[0]))
+62 			}
+63 		}
+64 	}
+65 	return nil
+66 }
+67 
+68 // ArbitraryArgs never returns an error.
+69 func ArbitraryArgs(cmd *Command, args []string) error {
+70 	return nil
+71 }
+72 
+73 // MinimumNArgs returns an error if there is not at least N args.
+74 func MinimumNArgs(n int) PositionalArgs {
+75 	return func(cmd *Command, args []string) error {
+76 		if len(args) < n {
+77 			return fmt.Errorf("requires at least %d arg(s), only received %d", n, len(args))
+78 		}
+79 		return nil
+80 	}
+81 }
+82 
+83 // MaximumNArgs returns an error if there are more than N args.
+84 func MaximumNArgs(n int) PositionalArgs {
+85 	return func(cmd *Command, args []string) error {
+86 		if len(args) > n {
+87 			return fmt.Errorf("accepts at most %d arg(s), received %d", n, len(args))
+88 		}
+89 		return nil
+90 	}
+91 }
+92 
+93 // ExactArgs returns an error if there are not exactly n args.
+94 func ExactArgs(n int) PositionalArgs {
+95 	return func(cmd *Command, args []string) error {
+96 		if len(args) != n {
+97 			return fmt.Errorf("accepts %d arg(s), received %d", n, len(args))
+98 		}
+99 		return nil
+100 	}
+101 }
+102 
+103 // RangeArgs returns an error if the number of args is not within the expected range.
+104 func RangeArgs(min int, max int) PositionalArgs {
+105 	return func(cmd *Command, args []string) error {
+106 		if len(args) < min || len(args) > max {
+107 			return fmt.Errorf("accepts between %d and %d arg(s), received %d", min, max, len(args))
+108 		}
+109 		return nil
+110 	}
+111 }
+112 
+113 // MatchAll allows combining several PositionalArgs to work in concert.
+114 func MatchAll(pargs ...PositionalArgs) PositionalArgs {
+115 	return func(cmd *Command, args []string) error {
+116 		for _, parg := range pargs {
+117 			if err := parg(cmd, args); err != nil {
+118 				return err
+119 			}
+120 		}
+121 		return nil
+122 	}
+123 }
+124 
+125 // ExactValidArgs returns an error if there are not exactly N positional args OR
+126 // there are any positional args that are not in the ValidArgs field of Command
+127 //
+128 // Deprecated: use MatchAll(ExactArgs(n), OnlyValidArgs) instead
+129 func ExactValidArgs(n int) PositionalArgs {
+130 	return MatchAll(ExactArgs(n), OnlyValidArgs)
+131 }
+132 
+=========
+
+## Additional Includes
+The following is a set of included files used as context for the source code above.
+This is usually included libraries needed as context to write better tests:
+======
+// Copyright 2013-2023 The Cobra Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package cobra is a commander providing a simple interface to create powerful modern CLI interfaces.
+// In addition to providing an interface, Cobra simultaneously provides a controller to organize your application code.
+package cobra
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	flag "github.com/spf13/pflag"
+)
+
+const (
+	FlagSetByCobraAnnotation     = "cobra_annotation_flag_set_by_cobra"
+	CommandDisplayNameAnnotation = "cobra_annotation_command_display_name"
+)
+
+// FParseErrWhitelist configures Flag parse errors to be ignored
+type FParseErrWhitelist flag.ParseErrorsWhitelist
+
+// Group Structure to manage groups for commands
+type Group struct {
+	ID    string
+	Title string
+}
+
+// Command is just that, a command for your application.
+// E.g.  'go run ...' - 'run' is the command. Cobra requires
+// you to define the usage and description as part of your command
+// definition to ensure usability.
+type Command struct {
+	// Use is the one-line usage message.
+	// Recommended syntax is as follows:
+	//   [ ] identifies an optional argument. Arguments that are not enclosed in brackets are required.
+	//   ... indicates that you can specify multiple values for the previous argument.
+	//   |   indicates mutually exclusive information. You can use the argument to the left of the separator or the
+	//       argument to the right of the separator. You cannot use both arguments in a single use of the command.
+	//   { } delimits a set of mutually exclusive arguments when one of the arguments is required. If the arguments are
+	//       optional, they are enclosed in brackets ([ ]).
+	// Example: add [-F file | -D dir]... [-f format] profile
+	Use string
+
+	// Aliases is an array of aliases that can be used instead of the first word in Use.
+	Aliases []string
+
+	// SuggestFor is an array of command names for which this command will be suggested -
+	// similar to aliases but only suggests.
+	SuggestFor []string
+
+	// Short is the short description shown in the 'help' output.
+	Short string
+
+	// The group id under which this subcommand is grouped in the 'help' output of its parent.
+	GroupID string
+
+	// Long is the long message shown in the 'help <this-command>' output.
+	Long string
+
+	// Example is examples of how to use the command.
+	Example string
+
+	// ValidArgs is list of all valid non-flag arguments that are accepted in shell completions
+	ValidArgs []string
+	// ValidArgsFunction is an optional function that provides valid non-flag arguments for shell completion.
+	// It is a dynamic version of using ValidArgs.
+	// Only one of ValidArgs and ValidArgsFunction can be used for a command.
+	ValidArgsFunction func(cmd *Command, args []string, toComplete string) ([]string, ShellCompDirective)
+
+	// Expected arguments
+	Args PositionalArgs
+
+	// ArgAliases is List of aliases for ValidArgs.
+	// These are not suggested to the user in the shell completion,
+	// but accepted if entered manually.
+	ArgAliases []string
+
+	// BashCompletionFunction is custom bash functions used by the legacy bash autocompletion generator.
+	// For portability with other shells, it is recommended to instead use ValidArgsFunction
+	BashCompletionFunction string
+
+	// Deprecated defines, if this command is deprecated and should print this string when used.
+	Deprecated string
+
+	// Annotations are key/value pairs that can be used by applications to identify or
+	// group commands or set special options.
+	Annotations map[string]string
+
+	// Version defines the version for this command. If this value is non-empty and the command does not
+	// define a "version" flag, a "version" boolean flag will be added to the command and, if specified,
+	// will print content of the "Version" variable. A shorthand "v" flag will also be added if the
+	// command does not define one.
+	Version string
+
+	// The *Run functions are executed in the following order:
+	//   * PersistentPreRun()
+	//   * PreRun()
+	//   * Run()
+	//   * PostRun()
+	//   * PersistentPostRun()
+	// All functions get the same args, the arguments after the command name.
+	// The *PreRun and *PostRun functions will only be executed if the Run function of the current
+	// command has been declared.
+	//
+	// PersistentPreRun: children of this command will inherit and execute.
+	PersistentPreRun func(cmd *Command, args []string)
+	// PersistentPreRunE: PersistentPreRun but returns an error.
+	PersistentPreRunE func(cmd *Command, args []string) error
+	// PreRun: children of this command will not inherit.
+	PreRun func(cmd *Command, args []string)
+	// PreRunE: PreRun but returns an error.
+	PreRunE func(cmd *Command, args []string) error
+	// Run: Typically the actual work function. Most commands will only implement this.
+	Run func(cmd *Command, args []string)
+	// RunE: Run but returns an error.
+	RunE func(cmd *Command, args []string) error
+	// PostRun: run after the Run command.
+	PostRun func(cmd *Command, args []string)
+	// PostRunE: PostRun but returns an error.
+	PostRunE func(cmd *Command, args []string) error
+	// PersistentPostRun: children of this command will inherit and execute after PostRun.
+	PersistentPostRun func(cmd *Command, args []string)
+	// PersistentPostRunE: PersistentPostRun but returns an error.
+	PersistentPostRunE func(cmd *Command, args []string) error
+
+	// groups for subcommands
+	commandgroups []*Group
+
+	// args is actual args parsed from flags.
+	args []string
+	// flagErrorBuf contains all error messages from pflag.
+	flagErrorBuf *bytes.Buffer
+	// flags is full set of flags.
+	flags *flag.FlagSet
+	// pflags contains persistent flags.
+	pflags *flag.FlagSet
+	// lflags contains local flags.
+	// This field does not represent internal state, it's used as a cache to optimise LocalFlags function call
+	lflags *flag.FlagSet
+	// iflags contains inherited flags.
+	// This field does not represent internal state, it's used as a cache to optimise InheritedFlags function call
+	iflags *flag.FlagSet
+	// parentsPflags is all persistent flags of cmd's parents.
+	parentsPflags *flag.FlagSet
+	// globNormFunc is the global normalization function
+	// that we can use on every pflag set and children commands
+	globNormFunc func(f *flag.FlagSet, name string) flag.NormalizedName
+
+	// usageFunc is usage func defined by user.
+	usageFunc func(*Command) error
+	// usageTemplate is usage template defined by user.
+	usageTemplate string
+	// flagErrorFunc is func defined by user and it's called when the parsing of
+	// flags returns an error.
+	flagErrorFunc func(*Command, error) error
+	// helpTemplate is help template defined by user.
+	helpTemplate string
+	// helpFunc is help func defined by user.
+	helpFunc func(*Command, []string)
+	// helpCommand is command with usage 'help'. If it's not defined by user,
+	// cobra uses default help command.
+	helpCommand *Command
+	// helpCommandGroupID is the group id for the helpCommand
+	helpCommandGroupID string
+
+	// completionCommandGroupID is the group id for the completion command
+	completionCommandGroupID string
+
+	// versionTemplate is the version template defined by user.
+	versionTemplate string
+
+	// errPrefix is the error message prefix defined by user.
+	errPrefix string
+
+	// inReader is a reader defined by the user that replaces stdin
+	inReader io.Reader
+	// outWriter is a writer defined by the user that replaces stdout
+	outWriter io.Writer
+	// errWriter is a writer defined by the user that replaces stderr
+	errWriter io.Writer
+
+	// FParseErrWhitelist flag parse errors to be ignored
+	FParseErrWhitelist FParseErrWhitelist
+
+	// CompletionOptions is a set of options to control the handling of shell completion
+	CompletionOptions CompletionOptions
+
+	// commandsAreSorted defines, if command slice are sorted or not.
+	commandsAreSorted bool
+	// commandCalledAs is the name or alias value used to call this command.
+	commandCalledAs struct {
+		name   string
+		called bool
+	}
+
+	ctx context.Context
+
+	// commands is the list of commands supported by this program.
+	commands []*Command
+	// parent is a parent command for this command.
+	parent *Command
+	// Max lengths of commands' string lengths for use in padding.
+	commandsMaxUseLen         int
+	commandsMaxCommandPathLen int
+	commandsMaxNameLen        int
+
+	// TraverseChildren parses flags on all parents before executing child command.
+	TraverseChildren bool
+
+	// Hidden defines, if this command is hidden and should NOT show up in the list of available commands.
+	Hidden bool
+
+	// SilenceErrors is an option to quiet errors down stream.
+	SilenceErrors bool
+
+	// SilenceUsage is an option to silence usage when an error occurs.
+	SilenceUsage bool
+
+	// DisableFlagParsing disables the flag parsing.
+	// If this is true all flags will be passed to the command as arguments.
+	DisableFlagParsing bool
+
+	// DisableAutoGenTag defines, if gen tag ("Auto generated by spf13/cobra...")
+	// will be printed by generating docs for this command.
+	DisableAutoGenTag bool
+
+	// DisableFlagsInUseLine will disable the addition of [flags] to the usage
+	// line of a command when printing help or generating docs
+	DisableFlagsInUseLine bool
+
+	// DisableSuggestions disables the suggestions based on Levenshtein distance
+	// that go along with 'unknown command' messages.
+	DisableSuggestions bool
+
+	// SuggestionsMinimumDistance defines minimum levenshtein distance to display suggestions.
+	// Must be > 0.
+	SuggestionsMinimumDistance int
+}
+
+// Context returns underlying command context. If command was executed
+// with ExecuteContext or the context was set with SetContext, the
+// previously set context will be returned. Otherwise, nil is returned.
+//
+// Notice that a call to Execute and ExecuteC will replace a nil context of
+// a command with a context.Background, so a background context will be
+// returned by Context after one of these functions has been called.
+func (c *Command) Context() context.Context {
+	return c.ctx
+}
+
+// SetContext sets context for the command. This context will be overwritten by
+// Command.ExecuteContext or Command.ExecuteContextC.
+func (c *Command) SetContext(ctx context.Context) {
+	c.ctx = ctx
+}
+
+// SetArgs sets arguments for the command. It is set to os.Args[1:] by default, if desired, can be overridden
+// particularly useful when testing.
+func (c *Command) SetArgs(a []string) {
+	c.args = a
+}
+
+// SetOutput sets the destination for usage and error messages.
+// If output is nil, os.Stderr is used.
+// Deprecated: Use SetOut and/or SetErr instead
+func (c *Command) SetOutput(output io.Writer) {
+	c.outWriter = output
+	c.errWriter = output
+}
+
+// SetOut sets the destination for usage messages.
+// If newOut is nil, os.Stdout is used.
+func (c *Command) SetOut(newOut io.Writer) {
+	c.outWriter = newOut
+}
+
+// SetErr sets the destination for error messages.
+// If newErr is nil, os.Stderr is used.
+func (c *Command) SetErr(newErr io.Writer) {
+	c.errWriter = newErr
+}
+
+// SetIn sets the source for input data
+// If newIn is nil, os.Stdin is used.
+func (c *Command) SetIn(newIn io.Reader) {
+	c.inReader = newIn
+}
+
+// SetUsageFunc sets usage function. Usage can be defined by application.
+func (c *Command) SetUsageFunc(f func(*Command) error) {
+	c.usageFunc = f
+}
+
+// SetUsageTemplate sets usage template. Can be defined by Application.
+func (c *Command) SetUsageTemplate(s string) {
+	c.usageTemplate = s
+}
+
+// SetFlagErrorFunc sets a function to generate an error when flag parsing
+// fails.
+func (c *Command) SetFlagErrorFunc(f func(*Command, error) error) {
+	c.flagErrorFunc = f
+}
+
+// SetHelpFunc sets help function. Can be defined by Application.
+func (c *Command) SetHelpFunc(f func(*Command, []string)) {
+	c.helpFunc = f
+}
+
+// SetHelpCommand sets help command.
+func (c *Command) SetHelpCommand(cmd *Command) {
+	c.helpCommand = cmd
+}
+
+// SetHelpCommandGroupID sets the group id of the help command.
+func (c *Command) SetHelpCommandGroupID(groupID string) {
+	if c.helpCommand != nil {
+		c.helpCommand.GroupID = groupID
+	}
+	// helpCommandGroupID is used if no helpCommand is defined by the user
+	c.helpCommandGroupID = groupID
+}
+
+// SetCompletionCommandGroupID sets the group id of the completion command.
+func (c *Command) SetCompletionCommandGroupID(groupID string) {
+	// completionCommandGroupID is used if no completion command is defined by the user
+	c.Root().completionCommandGroupID = groupID
+}
+
+// SetHelpTemplate sets help template to be used. Application can use it to set custom template.
+func (c *Command) SetHelpTemplate(s string) {
+	c.helpTemplate = s
+}
+
+// SetVersionTemplate sets version template to be used. Application can use it to set custom template.
+func (c *Command) SetVersionTemplate(s string) {
+	c.versionTemplate = s
+}
+
+// SetErrPrefix sets error message prefix to be used. Application can use it to set custom prefix.
+func (c *Command) SetErrPrefix(s string) {
+	c.errPrefix = s
+}
+
+// SetGlobalNormalizationFunc sets a normalization function to all flag sets and also to child commands.
+// The user should not have a cyclic dependency on commands.
+func (c *Command) SetGlobalNormalizationFunc(n func(f *flag.FlagSet, name string) flag.NormalizedName) {
+	c.Flags().SetNormalizeFunc(n)
+	c.PersistentFlags().SetNormalizeFunc(n)
+	c.globNormFunc = n
+
+	for _, command := range c.commands {
+		command.SetGlobalNormalizationFunc(n)
+	}
+}
+
+// OutOrStdout returns output to stdout.
+func (c *Command) OutOrStdout() io.Writer {
+	return c.getOut(os.Stdout)
+}
+
+// OutOrStderr returns output to stderr
+func (c *Command) OutOrStderr() io.Writer {
+	return c.getOut(os.Stderr)
+}
+
+// ErrOrStderr returns output to stderr
+func (c *Command) ErrOrStderr() io.Writer {
+	return c.getErr(os.Stderr)
+}
+
+// InOrStdin returns input to stdin
+func (c *Command) InOrStdin() io.Reader {
+	return c.getIn(os.Stdin)
+}
+
+func (c *Command) getOut(def io.Writer) io.Writer {
+	if c.outWriter != nil {
+		return c.outWriter
+	}
+	if c.HasParent() {
+		return c.parent.getOut(def)
+	}
+	return def
+}
+
+func (c *Command) getErr(def io.Writer) io.Writer {
+	if c.errWriter != nil {
+		return c.errWriter
+	}
+	if c.HasParent() {
+		return c.parent.getErr(def)
+	}
+	return def
+}
+
+func (c *Command) getIn(def io.Reader) io.Reader {
+	if c.inReader != nil {
+		return c.inReader
+	}
+	if c.HasParent() {
+		return c.parent.getIn(def)
+	}
+	return def
+}
+
+// UsageFunc returns either the function set by SetUsageFunc for this command
+// or a parent, or it returns a default usage function.
+func (c *Command) UsageFunc() (f func(*Command) error) {
+	if c.usageFunc != nil {
+		return c.usageFunc
+	}
+	if c.HasParent() {
+		return c.Parent().UsageFunc()
+	}
+	return func(c *Command) error {
+		c.mergePersistentFlags()
+		err := tmpl(c.OutOrStderr(), c.UsageTemplate(), c)
+		if err != nil {
+			c.PrintErrln(err)
+		}
+		return err
+	}
+}
+
+// Usage puts out the usage for the command.
+// Used when a user provides invalid input.
+// Can be defined by user by overriding UsageFunc.
+func (c *Command) Usage() error {
+	return c.UsageFunc()(c)
+}
+
+// HelpFunc returns either the function set by SetHelpFunc for this command
+// or a parent, or it returns a function with default help behavior.
+func (c *Command) HelpFunc() func(*Command, []string) {
+	if c.helpFunc != nil {
+		return c.helpFunc
+	}
+	if c.HasParent() {
+		return c.Parent().HelpFunc()
+	}
+	return func(c *Command, a []string) {
+		c.mergePersistentFlags()
+		// The help should be sent to stdout
+		// See https://github.com/spf13/cobra/issues/1002
+		err := tmpl(c.OutOrStdout(), c.HelpTemplate(), c)
+		if err != nil {
+			c.PrintErrln(err)
+		}
+	}
+}
+
+// Help puts out the help for the command.
+// Used when a user calls help [command].
+// Can be defined by user by overriding HelpFunc.
+func (c *Command) Help() error {
+	c.HelpFunc()(c, []string{})
+	return nil
+}
+
+// UsageString returns usage string.
+func (c *Command) UsageString() string {
+	// Storing normal writers
+	tmpOutput := c.outWriter
+	tmpErr := c.errWriter
+
+	bb := new(bytes.Buffer)
+	c.outWriter = bb
+	c.errWriter = bb
+
+	CheckErr(c.Usage())
+
+	// Setting things back to normal
+	c.outWriter = tmpOutput
+	c.errWriter = tmpErr
+
+	return bb.String()
+}
+
+// FlagErrorFunc returns either the function set by SetFlagErrorFunc for this
+// command or a parent, or it returns a function which returns the original
+// error.
+func (c *Command) FlagErrorFunc() (f func(*Command, error) error) {
+	if c.flagErrorFunc != nil {
+		return c.flagErrorFunc
+	}
+
+	if c.HasParent() {
+		return c.parent.FlagErrorFunc()
+	}
+	return func(c *Command, err error) error {
+		return err
+	}
+}
+
+var minUsagePadding = 25
+
+// UsagePadding return padding for the usage.
+func (c *Command) UsagePadding() int {
+	if c.parent == nil || minUsagePadding > c.parent.commandsMaxUseLen {
+		return minUsagePadding
+	}
+	return c.parent.commandsMaxUseLen
+}
+
+var minCommandPathPadding = 11
+
+// CommandPathPadding return padding for the command path.
+func (c *Command) CommandPathPadding() int {
+	if c.parent == nil || minCommandPathPadding > c.parent.commandsMaxCommandPathLen {
+		return minCommandPathPadding
+	}
+	return c.parent.commandsMaxCommandPathLen
+}
+
+var minNamePadding = 11
+
+// NamePadding returns padding for the name.
+func (c *Command) NamePadding() int {
+	if c.parent == nil || minNamePadding > c.parent.commandsMaxNameLen {
+		return minNamePadding
+	}
+	return c.parent.commandsMaxNameLen
+}
+
+// UsageTemplate returns usage template for the command.
+func (c *Command) UsageTemplate() string {
+	if c.usageTemplate != "" {
+		return c.usageTemplate
+	}
+
+	if c.HasParent() {
+		return c.parent.UsageTemplate()
+	}
+	return Usage:{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+
+Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
+
+Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+
+}
+
+// HelpTemplate return help template for the command.
+func (c *Command) HelpTemplate() string {
+	if c.helpTemplate != "" {
+		return c.helpTemplate
+	}
+
+	if c.HasParent() {
+		return c.parent.HelpTemplate()
+	}
+	return {{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
+
+{{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}
+}
+
+// VersionTemplate return version template for the command.
+func (c *Command) VersionTemplate() string {
+	if c.versionTemplate != "" {
+		return c.versionTemplate
+	}
+
+	if c.HasParent() {
+		return c.parent.VersionTemplate()
+	}
+	return {{with .Name}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
+
+}
+
+// ErrPrefix return error message prefix for the command
+func (c *Command) ErrPrefix() string {
+	if c.errPrefix != "" {
+		return c.errPrefix
+	}
+
+	if c.HasParent() {
+		return c.parent.ErrPrefix()
+	}
+	return "Error:"
+}
+
+func hasNoOptDefVal(name string, fs *flag.FlagSet) bool {
+	flag := fs.Lookup(name)
+	if flag == nil {
+		return false
+	}
+	return flag.NoOptDefVal != ""
+}
+
+func shortHasNoOptDefVal(name string, fs *flag.FlagSet) bool {
+	if len(name) == 0 {
+		return false
+	}
+
+	flag := fs.ShorthandLookup(name[:1])
+	if flag == nil {
+		return false
+	}
+	return flag.NoOptDefVal != ""
+}
+
+func stripFlags(args []string, c *Command) []string {
+	if len(args) == 0 {
+		return args
+	}
+	c.mergePersistentFlags()
+
+	commands := []string{}
+	flags := c.Flags()
+
+Loop:
+	for len(args) > 0 {
+		s := args[0]
+		args = args[1:]
+		switch {
+		case s == "--":
+			// "--" terminates the flags
+			break Loop
+		case strings.HasPrefix(s, "--") && !strings.Contains(s, "=") && !hasNoOptDefVal(s[2:], flags):
+			// If '--flag arg' then
+			// delete arg from args.
+			fallthrough // (do the same as below)
+		case strings.HasPrefix(s, "-") && !strings.Contains(s, "=") && len(s) == 2 && !shortHasNoOptDefVal(s[1:], flags):
+			// If '-f arg' then
+			// delete 'arg' from args or break the loop if len(args) <= 1.
+			if len(args) <= 1 {
+				break Loop
+			} else {
+				args = args[1:]
+				continue
+			}
+		case s != "" && !strings.HasPrefix(s, "-"):
+			commands = append(commands, s)
+		}
+	}
+
+	return commands
+}
+
+// argsMinusFirstX removes only the first x from args.  Otherwise, commands that look like
+// openshift admin policy add-role-to-user admin my-user, lose the admin argument (arg[4]).
+// Special care needs to be taken not to remove a flag value.
+func (c *Command) argsMinusFirstX(args []string, x string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	c.mergePersistentFlags()
+	flags := c.Flags()
+
+Loop:
+	for pos := 0; pos < len(args); pos++ {
+		s := args[pos]
+		switch {
+		case s == "--":
+			// -- means we have reached the end of the parseable args. Break out of the loop now.
+			break Loop
+		case strings.HasPrefix(s, "--") && !strings.Contains(s, "=") && !hasNoOptDefVal(s[2:], flags):
+			fallthrough
+		case strings.HasPrefix(s, "-") && !strings.Contains(s, "=") && len(s) == 2 && !shortHasNoOptDefVal(s[1:], flags):
+			// This is a flag without a default value, and an equal sign is not used. Increment pos in order to skip
+			// over the next arg, because that is the value of this flag.
+			pos++
+			continue
+		case !strings.HasPrefix(s, "-"):
+			// This is not a flag or a flag value. Check to see if it matches what we're looking for, and if so,
+			// return the args, excluding the one at this position.
+			if s == x {
+				ret := make([]string, 0, len(args)-1)
+				ret = append(ret, args[:pos]...)
+				ret = append(ret, args[pos+1:]...)
+				return ret
+			}
+		}
+	}
+	return args
+}
+
+func isFlagArg(arg string) bool {
+	return ((len(arg) >= 3 && arg[0:2] == "--") ||
+		(len(arg) >= 2 && arg[0] == '-' && arg[1] != '-'))
+}
+
+// Find the target command given the args and command tree
+// Meant to be run on the highest node. Only searches down.
+func (c *Command) Find(args []string) (*Command, []string, error) {
+	var innerfind func(*Command, []string) (*Command, []string)
+
+	innerfind = func(c *Command, innerArgs []string) (*Command, []string) {
+		argsWOflags := stripFlags(innerArgs, c)
+		if len(argsWOflags) == 0 {
+			return c, innerArgs
+		}
+		nextSubCmd := argsWOflags[0]
+
+		cmd := c.findNext(nextSubCmd)
+		if cmd != nil {
+			return innerfind(cmd, c.argsMinusFirstX(innerArgs, nextSubCmd))
+		}
+		return c, innerArgs
+	}
+
+	commandFound, a := innerfind(c, args)
+	if commandFound.Args == nil {
+		return commandFound, a, legacyArgs(commandFound, stripFlags(a, commandFound))
+	}
+	return commandFound, a, nil
+}
+
+func (c *Command) findSuggestions(arg string) string {
+	if c.DisableSuggestions {
+		return ""
+	}
+	if c.SuggestionsMinimumDistance <= 0 {
+		c.SuggestionsMinimumDistance = 2
+	}
+	var sb strings.Builder
+	if suggestions := c.SuggestionsFor(arg); len(suggestions) > 0 {
+		sb.WriteString("\n\nDid you mean this?\n")
+		for _, s := range suggestions {
+			_, _ = fmt.Fprintf(&sb, "\t%v\n", s)
+		}
+	}
+	return sb.String()
+}
+
+func (c *Command) findNext(next string) *Command {
+	matches := make([]*Command, 0)
+	for _, cmd := range c.commands {
+		if commandNameMatches(cmd.Name(), next) || cmd.HasAlias(next) {
+			cmd.commandCalledAs.name = next
+			return cmd
+		}
+		if EnablePrefixMatching && cmd.hasNameOrAliasPrefix(next) {
+			matches = append(matches, cmd)
+		}
+	}
+
+	if len(matches) == 1 {
+		// Temporarily disable gosec G602, which produces a false positive.
+		// See https://github.com/securego/gosec/issues/1005.
+		return matches[0] // #nosec G602
+	}
+
+	return nil
+}
+
+// Traverse the command tree to find the command, and parse args for
+// each parent.
+func (c *Command) Traverse(args []string) (*Command, []string, error) {
+	flags := []string{}
+	inFlag := false
+
+	for i, arg := range args {
+		switch {
+		// A long flag with a space separated value
+		case strings.HasPrefix(arg, "--") && !strings.Contains(arg, "="):
+			// TODO: this isn't quite right, we should really check ahead for 'true' or 'false'
+			inFlag = !hasNoOptDefVal(arg[2:], c.Flags())
+			flags = append(flags, arg)
+			continue
+		// A short flag with a space separated value
+		case strings.HasPrefix(arg, "-") && !strings.Contains(arg, "=") && len(arg) == 2 && !shortHasNoOptDefVal(arg[1:], c.Flags()):
+			inFlag = true
+			flags = append(flags, arg)
+			continue
+		// The value for a flag
+		case inFlag:
+			inFlag = false
+			flags = append(flags, arg)
+			continue
+		// A flag without a value, or with an = separated value
+		case isFlagArg(arg):
+			flags = append(flags, arg)
+			continue
+		}
+
+		cmd := c.findNext(arg)
+		if cmd == nil {
+			return c, args, nil
+		}
+
+		if err := c.ParseFlags(flags); err != nil {
+			return nil, args, err
+		}
+		return cmd.Traverse(args[i+1:])
+	}
+	return c, args, nil
+}
+
+// SuggestionsFor provides suggestions for the typedName.
+func (c *Command) SuggestionsFor(typedName string) []string {
+	suggestions := []string{}
+	for _, cmd := range c.commands {
+		if cmd.IsAvailableCommand() {
+			levenshteinDistance := ld(typedName, cmd.Name(), true)
+			suggestByLevenshtein := levenshteinDistance <= c.SuggestionsMinimumDistance
+			suggestByPrefix := strings.HasPrefix(strings.ToLower(cmd.Name()), strings.ToLower(typedName))
+			if suggestByLevenshtein || suggestByPrefix {
+				suggestions = append(suggestions, cmd.Name())
+			}
+			for _, explicitSuggestion := range cmd.SuggestFor {
+				if strings.EqualFold(typedName, explicitSuggestion) {
+					suggestions = append(suggestions, cmd.Name())
+				}
+			}
+		}
+	}
+	return suggestions
+}
+
+// VisitParents visits all parents of the command and invokes fn on each parent.
+func (c *Command) VisitParents(fn func(*Command)) {
+	if c.HasParent() {
+		fn(c.Parent())
+		c.Parent().VisitParents(fn)
+	}
+}
+
+// Root finds root command.
+func (c *Command) Root() *Command {
+	if c.HasParent() {
+		return c.Parent().Root()
+	}
+	return c
+}
+
+// ArgsLenAtDash will return the length of c.Flags().Args at the moment
+// when a -- was found during args parsing.
+func (c *Command) ArgsLenAtDash() int {
+	return c.Flags().ArgsLenAtDash()
+}
+
+func (c *Command) execute(a []string) (err error) {
+	if c == nil {
+		return fmt.Errorf("called Execute() on a nil Command")
+	}
+
+	if len(c.Deprecated) > 0 {
+		c.Printf("Command %q is deprecated, %s\n", c.Name(), c.Deprecated)
+	}
+
+	// initialize help and version flag at the last point possible to allow for user
+	// overriding
+	c.InitDefaultHelpFlag()
+	c.InitDefaultVersionFlag()
+
+	err = c.ParseFlags(a)
+	if err != nil {
+		return c.FlagErrorFunc()(c, err)
+	}
+
+	// If help is called, regardless of other flags, return we want help.
+	// Also say we need help if the command isn't runnable.
+	helpVal, err := c.Flags().GetBool("help")
+	if err != nil {
+		// should be impossible to get here as we always declare a help
+		// flag in InitDefaultHelpFlag()
+		c.Println("\"help\" flag declared as non-bool. Please correct your code")
+		return err
+	}
+
+	if helpVal {
+		return flag.ErrHelp
+	}
+
+	// for back-compat, only add version flag behavior if version is defined
+	if c.Version != "" {
+		versionVal, err := c.Flags().GetBool("version")
+		if err != nil {
+			c.Println("\"version\" flag declared as non-bool. Please correct your code")
+			return err
+		}
+		if versionVal {
+			err := tmpl(c.OutOrStdout(), c.VersionTemplate(), c)
+			if err != nil {
+				c.Println(err)
+			}
+			return err
+		}
+	}
+
+	if !c.Runnable() {
+		return flag.ErrHelp
+	}
+
+	c.preRun()
+
+	defer c.postRun()
+
+	argWoFlags := c.Flags().Args()
+	if c.DisableFlagParsing {
+		argWoFlags = a
+	}
+
+	if err := c.ValidateArgs(argWoFlags); err != nil {
+		return err
+	}
+
+	parents := make([]*Command, 0, 5)
+	for p := c; p != nil; p = p.Parent() {
+		if EnableTraverseRunHooks {
+			// When EnableTraverseRunHooks is set:
+			// - Execute all persistent pre-runs from the root parent till this command.
+			// - Execute all persistent post-runs from this command till the root parent.
+			parents = append([]*Command{p}, parents...)
+		} else {
+			// Otherwise, execute only the first found persistent hook.
+			parents = append(parents, p)
+		}
+	}
+	for _, p := range parents {
+		if p.PersistentPreRunE != nil {
+			if err := p.PersistentPreRunE(c, argWoFlags); err != nil {
+				return err
+			}
+			if !EnableTraverseRunHooks {
+				break
+			}
+		} else if p.PersistentPreRun != nil {
+			p.PersistentPreRun(c, argWoFlags)
+			if !EnableTraverseRunHooks {
+				break
+			}
+		}
+	}
+	if c.PreRunE != nil {
+		if err := c.PreRunE(c, argWoFlags); err != nil {
+			return err
+		}
+	} else if c.PreRun != nil {
+		c.PreRun(c, argWoFlags)
+	}
+
+	if err := c.ValidateRequiredFlags(); err != nil {
+		return err
+	}
+	if err := c.ValidateFlagGroups(); err != nil {
+		return err
+	}
+
+	if c.RunE != nil {
+		if err := c.RunE(c, argWoFlags); err != nil {
+			return err
+		}
+	} else {
+		c.Run(c, argWoFlags)
+	}
+	if c.PostRunE != nil {
+		if err := c.PostRunE(c, argWoFlags); err != nil {
+			return err
+		}
+	} else if c.PostRun != nil {
+		c.PostRun(c, argWoFlags)
+	}
+	for p := c; p != nil; p = p.Parent() {
+		if p.PersistentPostRunE != nil {
+			if err := p.PersistentPostRunE(c, argWoFlags); err != nil {
+				return err
+			}
+			if !EnableTraverseRunHooks {
+				break
+			}
+		} else if p.PersistentPostRun != nil {
+			p.PersistentPostRun(c, argWoFlags)
+			if !EnableTraverseRunHooks {
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *Command) preRun() {
+	for _, x := range initializers {
+		x()
+	}
+}
+
+func (c *Command) postRun() {
+	for _, x := range finalizers {
+		x()
+	}
+}
+
+// ExecuteContext is the same as Execute(), but sets the ctx on the command.
+// Retrieve ctx by calling cmd.Context() inside your *Run lifecycle or ValidArgs
+// functions.
+func (c *Command) ExecuteContext(ctx context.Context) error {
+	c.ctx = ctx
+	return c.Execute()
+}
+
+// Execute uses the args (os.Args[1:] by default)
+// and run through the command tree finding appropriate matches
+// for commands and then corresponding flags.
+func (c *Command) Execute() error {
+	_, err := c.ExecuteC()
+	return err
+}
+
+// ExecuteContextC is the same as ExecuteC(), but sets the ctx on the command.
+// Retrieve ctx by calling cmd.Context() inside your *Run lifecycle or ValidArgs
+// functions.
+func (c *Command) ExecuteContextC(ctx context.Context) (*Command, error) {
+	c.ctx = ctx
+	return c.ExecuteC()
+}
+
+// ExecuteC executes the command.
+func (c *Command) ExecuteC() (cmd *Command, err error) {
+	if c.ctx == nil {
+		c.ctx = context.Background()
+	}
+
+	// Regardless of what command execute is called on, run on Root only
+	if c.HasParent() {
+		return c.Root().ExecuteC()
+	}
+
+	// windows hook
+	if preExecHookFn != nil {
+		preExecHookFn(c)
+	}
+
+	// initialize help at the last point to allow for user overriding
+	c.InitDefaultHelpCmd()
+	// initialize completion at the last point to allow for user overriding
+	c.InitDefaultCompletionCmd()
+
+	// Now that all commands have been created, let's make sure all groups
+	// are properly created also
+	c.checkCommandGroups()
+
+	args := c.args
+
+	// Workaround FAIL with "go test -v" or "cobra.test -test.v", see #155
+	if c.args == nil && filepath.Base(os.Args[0]) != "cobra.test" {
+		args = os.Args[1:]
+	}
+
+	// initialize the hidden command to be used for shell completion
+	c.initCompleteCmd(args)
+
+	var flags []string
+	if c.TraverseChildren {
+		cmd, flags, err = c.Traverse(args)
+	} else {
+		cmd, flags, err = c.Find(args)
+	}
+	if err != nil {
+		// If found parse to a subcommand and then failed, talk about the subcommand
+		if cmd != nil {
+			c = cmd
+		}
+		if !c.SilenceErrors {
+			c.PrintErrln(c.ErrPrefix(), err.Error())
+			c.PrintErrf("Run '%v --help' for usage.\n", c.CommandPath())
+		}
+		return c, err
+	}
+
+	cmd.commandCalledAs.called = true
+	if cmd.commandCalledAs.name == "" {
+		cmd.commandCalledAs.name = cmd.Name()
+	}
+
+	// We have to pass global context to children command
+	// if context is present on the parent command.
+	if cmd.ctx == nil {
+		cmd.ctx = c.ctx
+	}
+
+	err = cmd.execute(flags)
+	if err != nil {
+		// Always show help if requested, even if SilenceErrors is in
+		// effect
+		if errors.Is(err, flag.ErrHelp) {
+			cmd.HelpFunc()(cmd, args)
+			return cmd, nil
+		}
+
+		// If root command has SilenceErrors flagged,
+		// all subcommands should respect it
+		if !cmd.SilenceErrors && !c.SilenceErrors {
+			c.PrintErrln(cmd.ErrPrefix(), err.Error())
+		}
+
+		// If root command has SilenceUsage flagged,
+		// all subcommands should respect it
+		if !cmd.SilenceUsage && !c.SilenceUsage {
+			c.Println(cmd.UsageString())
+		}
+	}
+	return cmd, err
+}
+
+func (c *Command) ValidateArgs(args []string) error {
+	if c.Args == nil {
+		return ArbitraryArgs(c, args)
+	}
+	return c.Args(c, args)
+}
+
+// ValidateRequiredFlags validates all required flags are present and returns an error otherwise
+func (c *Command) ValidateRequiredFlags() error {
+	if c.DisableFlagParsing {
+		return nil
+	}
+
+	flags := c.Flags()
+	missingFlagNames := []string{}
+	flags.VisitAll(func(pflag *flag.Flag) {
+		requiredAnnotation, found := pflag.Annotations[BashCompOneRequiredFlag]
+		if !found {
+			return
+		}
+		if (requiredAnnotation[0] == "true") && !pflag.Changed {
+			missingFlagNames = append(missingFlagNames, pflag.Name)
+		}
+	})
+
+	if len(missingFlagNames) > 0 {
+		return fmt.Errorf(required flag(s) "%s" not set, strings.Join(missingFlagNames, ", "))
+	}
+	return nil
+}
+
+// checkCommandGroups checks if a command has been added to a group that does not exists.
+// If so, we panic because it indicates a coding error that should be corrected.
+func (c *Command) checkCommandGroups() {
+	for _, sub := range c.commands {
+		// if Group is not defined let the developer know right away
+		if sub.GroupID != "" && !c.ContainsGroup(sub.GroupID) {
+			panic(fmt.Sprintf("group id '%s' is not defined for subcommand '%s'", sub.GroupID, sub.CommandPath()))
+		}
+
+		sub.checkCommandGroups()
+	}
+}
+
+// InitDefaultHelpFlag adds default help flag to c.
+// It is called automatically by executing the c or by calling help and usage.
+// If c already has help flag, it will do nothing.
+func (c *Command) InitDefaultHelpFlag() {
+	c.mergePersistentFlags()
+	if c.Flags().Lookup("help") == nil {
+		usage := "help for "
+		name := c.displayName()
+		if name == "" {
+			usage += "this command"
+		} else {
+			usage += name
+		}
+		c.Flags().BoolP("help", "h", false, usage)
+		_ = c.Flags().SetAnnotation("help", FlagSetByCobraAnnotation, []string{"true"})
+	}
+}
+
+// InitDefaultVersionFlag adds default version flag to c.
+// It is called automatically by executing the c.
+// If c already has a version flag, it will do nothing.
+// If c.Version is empty, it will do nothing.
+func (c *Command) InitDefaultVersionFlag() {
+	if c.Version == "" {
+		return
+	}
+
+	c.mergePersistentFlags()
+	if c.Flags().Lookup("version") == nil {
+		usage := "version for "
+		if c.Name() == "" {
+			usage += "this command"
+		} else {
+			usage += c.Name()
+		}
+		if c.Flags().ShorthandLookup("v") == nil {
+			c.Flags().BoolP("version", "v", false, usage)
+		} else {
+			c.Flags().Bool("version", false, usage)
+		}
+		_ = c.Flags().SetAnnotation("version", FlagSetByCobraAnnotation, []string{"true"})
+	}
+}
+
+// InitDefaultHelpCmd adds default help command to c.
+// It is called automatically by executing the c or by calling help and usage.
+// If c already has help command or c has no subcommands, it will do nothing.
+func (c *Command) InitDefaultHelpCmd() {
+	if !c.HasSubCommands() {
+		return
+	}
+
+	if c.helpCommand == nil {
+		c.helpCommand = &Command{
+			Use:   "help [command]",
+			Short: "Help about any command",
+			Long: Help provides help for any command in the application.
+Simply type  + c.displayName() +  help [path to command] for full details.,
+			ValidArgsFunction: func(c *Command, args []string, toComplete string) ([]string, ShellCompDirective) {
+				var completions []string
+				cmd, _, e := c.Root().Find(args)
+				if e != nil {
+					return nil, ShellCompDirectiveNoFileComp
+				}
+				if cmd == nil {
+					// Root help command.
+					cmd = c.Root()
+				}
+				for _, subCmd := range cmd.Commands() {
+					if subCmd.IsAvailableCommand() || subCmd == cmd.helpCommand {
+						if strings.HasPrefix(subCmd.Name(), toComplete) {
+							completions = append(completions, fmt.Sprintf("%s\t%s", subCmd.Name(), subCmd.Short))
+						}
+					}
+				}
+				return completions, ShellCompDirectiveNoFileComp
+			},
+			Run: func(c *Command, args []string) {
+				cmd, _, e := c.Root().Find(args)
+				if cmd == nil || e != nil {
+					c.Printf("Unknown help topic %#q\n", args)
+					CheckErr(c.Root().Usage())
+				} else {
+					cmd.InitDefaultHelpFlag()    // make possible 'help' flag to be shown
+					cmd.InitDefaultVersionFlag() // make possible 'version' flag to be shown
+					CheckErr(cmd.Help())
+				}
+			},
+			GroupID: c.helpCommandGroupID,
+		}
+	}
+	c.RemoveCommand(c.helpCommand)
+	c.AddCommand(c.helpCommand)
+}
+
+// ResetCommands delete parent, subcommand and help command from c.
+func (c *Command) ResetCommands() {
+	c.parent = nil
+	c.commands = nil
+	c.helpCommand = nil
+	c.parentsPflags = nil
+}
+
+// Sorts commands by their names.
+type commandSorterByName []*Command
+
+func (c commandSorterByName) Len() int           { return len(c) }
+func (c commandSorterByName) Swap(i, j int)      { c[i], c[j] = c[j], c[i] }
+func (c commandSorterByName) Less(i, j int) bool { return c[i].Name() < c[j].Name() }
+
+// Commands returns a sorted slice of child commands.
+func (c *Command) Commands() []*Command {
+	// do not sort commands if it already sorted or sorting was disabled
+	if EnableCommandSorting && !c.commandsAreSorted {
+		sort.Sort(commandSorterByName(c.commands))
+		c.commandsAreSorted = true
+	}
+	return c.commands
+}
+
+// AddCommand adds one or more commands to this parent command.
+func (c *Command) AddCommand(cmds ...*Command) {
+	for i, x := range cmds {
+		if cmds[i] == c {
+			panic("Command can't be a child of itself")
+		}
+		cmds[i].parent = c
+		// update max lengths
+		usageLen := len(x.Use)
+		if usageLen > c.commandsMaxUseLen {
+			c.commandsMaxUseLen = usageLen
+		}
+		commandPathLen := len(x.CommandPath())
+		if commandPathLen > c.commandsMaxCommandPathLen {
+			c.commandsMaxCommandPathLen = commandPathLen
+		}
+		nameLen := len(x.Name())
+		if nameLen > c.commandsMaxNameLen {
+			c.commandsMaxNameLen = nameLen
+		}
+		// If global normalization function exists, update all children
+		if c.globNormFunc != nil {
+			x.SetGlobalNormalizationFunc(c.globNormFunc)
+		}
+		c.commands = append(c.commands, x)
+		c.commandsAreSorted = false
+	}
+}
+
+// Groups returns a slice of child command groups.
+func (c *Command) Groups() []*Group {
+	return c.commandgroups
+}
+
+// AllChildCommandsHaveGroup returns if all subcommands are assigned to a group
+func (c *Command) AllChildCommandsHaveGroup() bool {
+	for _, sub := range c.commands {
+		if (sub.IsAvailableCommand() || sub == c.helpCommand) && sub.GroupID == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// ContainsGroup return if groupID exists in the list of command groups.
+func (c *Command) ContainsGroup(groupID string) bool {
+	for _, x := range c.commandgroups {
+		if x.ID == groupID {
+			return true
+		}
+	}
+	return false
+}
+
+// AddGroup adds one or more command groups to this parent command.
+func (c *Command) AddGroup(groups ...*Group) {
+	c.commandgroups = append(c.commandgroups, groups...)
+}
+
+// RemoveCommand removes one or more commands from a parent command.
+func (c *Command) RemoveCommand(cmds ...*Command) {
+	commands := []*Command{}
+main:
+	for _, command := range c.commands {
+		for _, cmd := range cmds {
+			if command == cmd {
+				command.parent = nil
+				continue main
+			}
+		}
+		commands = append(commands, command)
+	}
+	c.commands = commands
+	// recompute all lengths
+	c.commandsMaxUseLen = 0
+	c.commandsMaxCommandPathLen = 0
+	c.commandsMaxNameLen = 0
+	for _, command := range c.commands {
+		usageLen := len(command.Use)
+		if usageLen > c.commandsMaxUseLen {
+			c.commandsMaxUseLen = usageLen
+		}
+		commandPathLen := len(command.CommandPath())
+		if commandPathLen > c.commandsMaxCommandPathLen {
+			c.commandsMaxCommandPathLen = commandPathLen
+		}
+		nameLen := len(command.Name())
+		if nameLen > c.commandsMaxNameLen {
+			c.commandsMaxNameLen = nameLen
+		}
+	}
+}
+
+// Print is a convenience method to Print to the defined output, fallback to Stderr if not set.
+func (c *Command) Print(i ...interface{}) {
+	fmt.Fprint(c.OutOrStderr(), i...)
+}
+
+// Println is a convenience method to Println to the defined output, fallback to Stderr if not set.
+func (c *Command) Println(i ...interface{}) {
+	c.Print(fmt.Sprintln(i...))
+}
+
+// Printf is a convenience method to Printf to the defined output, fallback to Stderr if not set.
+func (c *Command) Printf(format string, i ...interface{}) {
+	c.Print(fmt.Sprintf(format, i...))
+}
+
+// PrintErr is a convenience method to Print to the defined Err output, fallback to Stderr if not set.
+func (c *Command) PrintErr(i ...interface{}) {
+	fmt.Fprint(c.ErrOrStderr(), i...)
+}
+
+// PrintErrln is a convenience method to Println to the defined Err output, fallback to Stderr if not set.
+func (c *Command) PrintErrln(i ...interface{}) {
+	c.PrintErr(fmt.Sprintln(i...))
+}
+
+// PrintErrf is a convenience method to Printf to the defined Err output, fallback to Stderr if not set.
+func (c *Command) PrintErrf(format string, i ...interface{}) {
+	c.PrintErr(fmt.Sprintf(format, i...))
+}
+
+// CommandPath returns the full path to this command.
+func (c *Command) CommandPath() string {
+	if c.HasParent() {
+		return c.Parent().CommandPath() + " " + c.Name()
+	}
+	return c.displayName()
+}
+
+func (c *Command) displayName() string {
+	if displayName, ok := c.Annotations[CommandDisplayNameAnnotation]; ok {
+		return displayName
+	}
+	return c.Name()
+}
+
+// UseLine puts out the full usage for a given command (including parents).
+func (c *Command) UseLine() string {
+	var useline string
+	use := strings.Replace(c.Use, c.Name(), c.displayName(), 1)
+	if c.HasParent() {
+		useline = c.parent.CommandPath() + " " + use
+	} else {
+		useline = use
+	}
+	if c.DisableFlagsInUseLine {
+		return useline
+	}
+	if c.HasAvailableFlags() && !strings.Contains(useline, "[flags]") {
+		useline += " [flags]"
+	}
+	return useline
+}
+
+// DebugFlags used to determine which flags have been assigned to which commands
+// and which persist.
+func (c *Command) DebugFlags() {
+	c.Println("DebugFlags called on", c.Name())
+	var debugflags func(*Command)
+
+	debugflags = func(x *Command) {
+		if x.HasFlags() || x.HasPersistentFlags() {
+			c.Println(x.Name())
+		}
+		if x.HasFlags() {
+			x.flags.VisitAll(func(f *flag.Flag) {
+				if x.HasPersistentFlags() && x.persistentFlag(f.Name) != nil {
+					c.Println("  -"+f.Shorthand+",", "--"+f.Name, "["+f.DefValue+"]", "", f.Value, "  [LP]")
+				} else {
+					c.Println("  -"+f.Shorthand+",", "--"+f.Name, "["+f.DefValue+"]", "", f.Value, "  [L]")
+				}
+			})
+		}
+		if x.HasPersistentFlags() {
+			x.pflags.VisitAll(func(f *flag.Flag) {
+				if x.HasFlags() {
+					if x.flags.Lookup(f.Name) == nil {
+						c.Println("  -"+f.Shorthand+",", "--"+f.Name, "["+f.DefValue+"]", "", f.Value, "  [P]")
+					}
+				} else {
+					c.Println("  -"+f.Shorthand+",", "--"+f.Name, "["+f.DefValue+"]", "", f.Value, "  [P]")
+				}
+			})
+		}
+		c.Println(x.flagErrorBuf)
+		if x.HasSubCommands() {
+			for _, y := range x.commands {
+				debugflags(y)
+			}
+		}
+	}
+
+	debugflags(c)
+}
+
+// Name returns the command's name: the first word in the use line.
+func (c *Command) Name() string {
+	name := c.Use
+	i := strings.Index(name, " ")
+	if i >= 0 {
+		name = name[:i]
+	}
+	return name
+}
+
+// HasAlias determines if a given string is an alias of the command.
+func (c *Command) HasAlias(s string) bool {
+	for _, a := range c.Aliases {
+		if commandNameMatches(a, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// CalledAs returns the command name or alias that was used to invoke
+// this command or an empty string if the command has not been called.
+func (c *Command) CalledAs() string {
+	if c.commandCalledAs.called {
+		return c.commandCalledAs.name
+	}
+	return ""
+}
+
+// hasNameOrAliasPrefix returns true if the Name or any of aliases start
+// with prefix
+func (c *Command) hasNameOrAliasPrefix(prefix string) bool {
+	if strings.HasPrefix(c.Name(), prefix) {
+		c.commandCalledAs.name = c.Name()
+		return true
+	}
+	for _, alias := range c.Aliases {
+		if strings.HasPrefix(alias, prefix) {
+			c.commandCalledAs.name = alias
+			return true
+		}
+	}
+	return false
+}
+
+// NameAndAliases returns a list of the command name and all aliases
+func (c *Command) NameAndAliases() string {
+	return strings.Join(append([]string{c.Name()}, c.Aliases...), ", ")
+}
+
+// HasExample determines if the command has example.
+func (c *Command) HasExample() bool {
+	return len(c.Example) > 0
+}
+
+// Runnable determines if the command is itself runnable.
+func (c *Command) Runnable() bool {
+	return c.Run != nil || c.RunE != nil
+}
+
+// HasSubCommands determines if the command has children commands.
+func (c *Command) HasSubCommands() bool {
+	return len(c.commands) > 0
+}
+
+// IsAvailableCommand determines if a command is available as a non-help command
+// (this includes all non deprecated/hidden commands).
+func (c *Command) IsAvailableCommand() bool {
+	if len(c.Deprecated) != 0 || c.Hidden {
+		return false
+	}
+
+	if c.HasParent() && c.Parent().helpCommand == c {
+		return false
+	}
+
+	if c.Runnable() || c.HasAvailableSubCommands() {
+		return true
+	}
+
+	return false
+}
+
+// IsAdditionalHelpTopicCommand determines if a command is an additional
+// help topic command; additional help topic command is determined by the
+// fact that it is NOT runnable/hidden/deprecated, and has no sub commands that
+// are runnable/hidden/deprecated.
+// Concrete example: https://github.com/spf13/cobra/issues/393#issuecomment-282741924.
+func (c *Command) IsAdditionalHelpTopicCommand() bool {
+	// if a command is runnable, deprecated, or hidden it is not a 'help' command
+	if c.Runnable() || len(c.Deprecated) != 0 || c.Hidden {
+		return false
+	}
+
+	// if any non-help sub commands are found, the command is not a 'help' command
+	for _, sub := range c.commands {
+		if !sub.IsAdditionalHelpTopicCommand() {
+			return false
+		}
+	}
+
+	// the command either has no sub commands, or no non-help sub commands
+	return true
+}
+
+// HasHelpSubCommands determines if a command has any available 'help' sub commands
+// that need to be shown in the usage/help default template under 'additional help
+// topics'.
+func (c *Command) HasHelpSubCommands() bool {
+	// return true on the first found available 'help' sub command
+	for _, sub := range c.commands {
+		if sub.IsAdditionalHelpTopicCommand() {
+			return true
+		}
+	}
+
+	// the command either has no sub commands, or no available 'help' sub commands
+	return false
+}
+
+// HasAvailableSubCommands determines if a command has available sub commands that
+// need to be shown in the usage/help default template under 'available commands'.
+func (c *Command) HasAvailableSubCommands() bool {
+	// return true on the first found available (non deprecated/help/hidden)
+	// sub command
+	for _, sub := range c.commands {
+		if sub.IsAvailableCommand() {
+			return true
+		}
+	}
+
+	// the command either has no sub commands, or no available (non deprecated/help/hidden)
+	// sub commands
+	return false
+}
+
+// HasParent determines if the command is a child command.
+func (c *Command) HasParent() bool {
+	return c.parent != nil
+}
+
+// GlobalNormalizationFunc returns the global normalization function or nil if it doesn't exist.
+func (c *Command) GlobalNormalizationFunc() func(f *flag.FlagSet, name string) flag.NormalizedName {
+	return c.globNormFunc
+}
+
+// Flags returns the complete FlagSet that applies
+// to this command (local and persistent declared here and by all parents).
+func (c *Command) Flags() *flag.FlagSet {
+	if c.flags == nil {
+		c.flags = flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+		if c.flagErrorBuf == nil {
+			c.flagErrorBuf = new(bytes.Buffer)
+		}
+		c.flags.SetOutput(c.flagErrorBuf)
+	}
+
+	return c.flags
+}
+
+// LocalNonPersistentFlags are flags specific to this command which will NOT persist to subcommands.
+// This function does not modify the flags of the current command, it's purpose is to return the current state.
+func (c *Command) LocalNonPersistentFlags() *flag.FlagSet {
+	persistentFlags := c.PersistentFlags()
+
+	out := flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+	c.LocalFlags().VisitAll(func(f *flag.Flag) {
+		if persistentFlags.Lookup(f.Name) == nil {
+			out.AddFlag(f)
+		}
+	})
+	return out
+}
+
+// LocalFlags returns the local FlagSet specifically set in the current command.
+// This function does not modify the flags of the current command, it's purpose is to return the current state.
+func (c *Command) LocalFlags() *flag.FlagSet {
+	c.mergePersistentFlags()
+
+	if c.lflags == nil {
+		c.lflags = flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+		if c.flagErrorBuf == nil {
+			c.flagErrorBuf = new(bytes.Buffer)
+		}
+		c.lflags.SetOutput(c.flagErrorBuf)
+	}
+	c.lflags.SortFlags = c.Flags().SortFlags
+	if c.globNormFunc != nil {
+		c.lflags.SetNormalizeFunc(c.globNormFunc)
+	}
+
+	addToLocal := func(f *flag.Flag) {
+		// Add the flag if it is not a parent PFlag, or it shadows a parent PFlag
+		if c.lflags.Lookup(f.Name) == nil && f != c.parentsPflags.Lookup(f.Name) {
+			c.lflags.AddFlag(f)
+		}
+	}
+	c.Flags().VisitAll(addToLocal)
+	c.PersistentFlags().VisitAll(addToLocal)
+	return c.lflags
+}
+
+// InheritedFlags returns all flags which were inherited from parent commands.
+// This function does not modify the flags of the current command, it's purpose is to return the current state.
+func (c *Command) InheritedFlags() *flag.FlagSet {
+	c.mergePersistentFlags()
+
+	if c.iflags == nil {
+		c.iflags = flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+		if c.flagErrorBuf == nil {
+			c.flagErrorBuf = new(bytes.Buffer)
+		}
+		c.iflags.SetOutput(c.flagErrorBuf)
+	}
+
+	local := c.LocalFlags()
+	if c.globNormFunc != nil {
+		c.iflags.SetNormalizeFunc(c.globNormFunc)
+	}
+
+	c.parentsPflags.VisitAll(func(f *flag.Flag) {
+		if c.iflags.Lookup(f.Name) == nil && local.Lookup(f.Name) == nil {
+			c.iflags.AddFlag(f)
+		}
+	})
+	return c.iflags
+}
+
+// NonInheritedFlags returns all flags which were not inherited from parent commands.
+// This function does not modify the flags of the current command, it's purpose is to return the current state.
+func (c *Command) NonInheritedFlags() *flag.FlagSet {
+	return c.LocalFlags()
+}
+
+// PersistentFlags returns the persistent FlagSet specifically set in the current command.
+func (c *Command) PersistentFlags() *flag.FlagSet {
+	if c.pflags == nil {
+		c.pflags = flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+		if c.flagErrorBuf == nil {
+			c.flagErrorBuf = new(bytes.Buffer)
+		}
+		c.pflags.SetOutput(c.flagErrorBuf)
+	}
+	return c.pflags
+}
+
+// ResetFlags deletes all flags from command.
+func (c *Command) ResetFlags() {
+	c.flagErrorBuf = new(bytes.Buffer)
+	c.flagErrorBuf.Reset()
+	c.flags = flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+	c.flags.SetOutput(c.flagErrorBuf)
+	c.pflags = flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+	c.pflags.SetOutput(c.flagErrorBuf)
+
+	c.lflags = nil
+	c.iflags = nil
+	c.parentsPflags = nil
+}
+
+// HasFlags checks if the command contains any flags (local plus persistent from the entire structure).
+func (c *Command) HasFlags() bool {
+	return c.Flags().HasFlags()
+}
+
+// HasPersistentFlags checks if the command contains persistent flags.
+func (c *Command) HasPersistentFlags() bool {
+	return c.PersistentFlags().HasFlags()
+}
+
+// HasLocalFlags checks if the command has flags specifically declared locally.
+func (c *Command) HasLocalFlags() bool {
+	return c.LocalFlags().HasFlags()
+}
+
+// HasInheritedFlags checks if the command has flags inherited from its parent command.
+func (c *Command) HasInheritedFlags() bool {
+	return c.InheritedFlags().HasFlags()
+}
+
+// HasAvailableFlags checks if the command contains any flags (local plus persistent from the entire
+// structure) which are not hidden or deprecated.
+func (c *Command) HasAvailableFlags() bool {
+	return c.Flags().HasAvailableFlags()
+}
+
+// HasAvailablePersistentFlags checks if the command contains persistent flags which are not hidden or deprecated.
+func (c *Command) HasAvailablePersistentFlags() bool {
+	return c.PersistentFlags().HasAvailableFlags()
+}
+
+// HasAvailableLocalFlags checks if the command has flags specifically declared locally which are not hidden
+// or deprecated.
+func (c *Command) HasAvailableLocalFlags() bool {
+	return c.LocalFlags().HasAvailableFlags()
+}
+
+// HasAvailableInheritedFlags checks if the command has flags inherited from its parent command which are
+// not hidden or deprecated.
+func (c *Command) HasAvailableInheritedFlags() bool {
+	return c.InheritedFlags().HasAvailableFlags()
+}
+
+// Flag climbs up the command tree looking for matching flag.
+func (c *Command) Flag(name string) (flag *flag.Flag) {
+	flag = c.Flags().Lookup(name)
+
+	if flag == nil {
+		flag = c.persistentFlag(name)
+	}
+
+	return
+}
+
+// Recursively find matching persistent flag.
+func (c *Command) persistentFlag(name string) (flag *flag.Flag) {
+	if c.HasPersistentFlags() {
+		flag = c.PersistentFlags().Lookup(name)
+	}
+
+	if flag == nil {
+		c.updateParentsPflags()
+		flag = c.parentsPflags.Lookup(name)
+	}
+	return
+}
+
+// ParseFlags parses persistent flag tree and local flags.
+func (c *Command) ParseFlags(args []string) error {
+	if c.DisableFlagParsing {
+		return nil
+	}
+
+	if c.flagErrorBuf == nil {
+		c.flagErrorBuf = new(bytes.Buffer)
+	}
+	beforeErrorBufLen := c.flagErrorBuf.Len()
+	c.mergePersistentFlags()
+
+	// do it here after merging all flags and just before parse
+	c.Flags().ParseErrorsWhitelist = flag.ParseErrorsWhitelist(c.FParseErrWhitelist)
+
+	err := c.Flags().Parse(args)
+	// Print warnings if they occurred (e.g. deprecated flag messages).
+	if c.flagErrorBuf.Len()-beforeErrorBufLen > 0 && err == nil {
+		c.Print(c.flagErrorBuf.String())
+	}
+
+	return err
+}
+
+// Parent returns a commands parent command.
+func (c *Command) Parent() *Command {
+	return c.parent
+}
+
+// mergePersistentFlags merges c.PersistentFlags() to c.Flags()
+// and adds missing persistent flags of all parents.
+func (c *Command) mergePersistentFlags() {
+	c.updateParentsPflags()
+	c.Flags().AddFlagSet(c.PersistentFlags())
+	c.Flags().AddFlagSet(c.parentsPflags)
+}
+
+// updateParentsPflags updates c.parentsPflags by adding
+// new persistent flags of all parents.
+// If c.parentsPflags == nil, it makes new.
+func (c *Command) updateParentsPflags() {
+	if c.parentsPflags == nil {
+		c.parentsPflags = flag.NewFlagSet(c.displayName(), flag.ContinueOnError)
+		c.parentsPflags.SetOutput(c.flagErrorBuf)
+		c.parentsPflags.SortFlags = false
+	}
+
+	if c.globNormFunc != nil {
+		c.parentsPflags.SetNormalizeFunc(c.globNormFunc)
+	}
+
+	c.Root().PersistentFlags().AddFlagSet(flag.CommandLine)
+
+	c.VisitParents(func(parent *Command) {
+		c.parentsPflags.AddFlagSet(parent.PersistentFlags())
+	})
+}
+
+// commandNameMatches checks if two command names are equal
+// taking into account case sensitivity according to
+// EnableCaseInsensitive global configuration.
+func commandNameMatches(s string, t string) bool {
+	if EnableCaseInsensitive {
+		return strings.EqualFold(s, t)
+	}
+
+	return s == t
+}
+// Copyright 2013-2023 The Cobra Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cobra
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/spf13/pflag"
+)
+
+func emptyRun(*Command, []string) {}
+
+func executeCommand(root *Command, args ...string) (output string, err error) {
+	_, output, err = executeCommandC(root, args...)
+	return output, err
+}
+
+func executeCommandWithContext(ctx context.Context, root *Command, args ...string) (output string, err error) {
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs(args)
+
+	err = root.ExecuteContext(ctx)
+
+	return buf.String(), err
+}
+
+func executeCommandC(root *Command, args ...string) (c *Command, output string, err error) {
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs(args)
+
+	c, err = root.ExecuteC()
+
+	return c, buf.String(), err
+}
+
+func executeCommandWithContextC(ctx context.Context, root *Command, args ...string) (c *Command, output string, err error) {
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs(args)
+
+	c, err = root.ExecuteContextC(ctx)
+
+	return c, buf.String(), err
+}
+
+func resetCommandLineFlagSet() {
+	pflag.CommandLine = pflag.NewFlagSet(os.Args[0], pflag.ExitOnError)
+}
+
+func checkStringContains(t *testing.T, got, expected string) {
+	if !strings.Contains(got, expected) {
+		t.Errorf("Expected to contain: \n %v\nGot:\n %v\n", expected, got)
+	}
+}
+
+func checkStringOmits(t *testing.T, got, expected string) {
+	if strings.Contains(got, expected) {
+		t.Errorf("Expected to not contain: \n %v\nGot: %v", expected, got)
+	}
+}
+
+const onetwo = "one two"
+
+func TestSingleCommand(t *testing.T) {
+	var rootCmdArgs []string
+	rootCmd := &Command{
+		Use:  "root",
+		Args: ExactArgs(2),
+		Run:  func(_ *Command, args []string) { rootCmdArgs = args },
+	}
+	aCmd := &Command{Use: "a", Args: NoArgs, Run: emptyRun}
+	bCmd := &Command{Use: "b", Args: NoArgs, Run: emptyRun}
+	rootCmd.AddCommand(aCmd, bCmd)
+
+	output, err := executeCommand(rootCmd, "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(rootCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("rootCmdArgs expected: %q, got: %q", onetwo, got)
+	}
+}
+
+func TestChildCommand(t *testing.T) {
+	var child1CmdArgs []string
+	rootCmd := &Command{Use: "root", Args: NoArgs, Run: emptyRun}
+	child1Cmd := &Command{
+		Use:  "child1",
+		Args: ExactArgs(2),
+		Run:  func(_ *Command, args []string) { child1CmdArgs = args },
+	}
+	child2Cmd := &Command{Use: "child2", Args: NoArgs, Run: emptyRun}
+	rootCmd.AddCommand(child1Cmd, child2Cmd)
+
+	output, err := executeCommand(rootCmd, "child1", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(child1CmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("child1CmdArgs expected: %q, got: %q", onetwo, got)
+	}
+}
+
+func TestCallCommandWithoutSubcommands(t *testing.T) {
+	rootCmd := &Command{Use: "root", Args: NoArgs, Run: emptyRun}
+	_, err := executeCommand(rootCmd)
+	if err != nil {
+		t.Errorf("Calling command without subcommands should not have error: %v", err)
+	}
+}
+
+func TestRootExecuteUnknownCommand(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	rootCmd.AddCommand(&Command{Use: "child", Run: emptyRun})
+
+	output, _ := executeCommand(rootCmd, "unknown")
+
+	expected := "Error: unknown command \"unknown\" for \"root\"\nRun 'root --help' for usage.\n"
+
+	if output != expected {
+		t.Errorf("Expected:\n %q\nGot:\n %q\n", expected, output)
+	}
+}
+
+func TestSubcommandExecuteC(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	c, output, err := executeCommandC(rootCmd, "child")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if c.Name() != "child" {
+		t.Errorf(invalid command returned from ExecuteC: expected "child"', got: %q, c.Name())
+	}
+}
+
+func TestExecuteContext(t *testing.T) {
+	ctx := context.TODO()
+
+	ctxRun := func(cmd *Command, args []string) {
+		if cmd.Context() != ctx {
+			t.Errorf("Command %q must have context when called with ExecuteContext", cmd.Use)
+		}
+	}
+
+	rootCmd := &Command{Use: "root", Run: ctxRun, PreRun: ctxRun}
+	childCmd := &Command{Use: "child", Run: ctxRun, PreRun: ctxRun}
+	granchildCmd := &Command{Use: "grandchild", Run: ctxRun, PreRun: ctxRun}
+
+	childCmd.AddCommand(granchildCmd)
+	rootCmd.AddCommand(childCmd)
+
+	if _, err := executeCommandWithContext(ctx, rootCmd, ""); err != nil {
+		t.Errorf("Root command must not fail: %+v", err)
+	}
+
+	if _, err := executeCommandWithContext(ctx, rootCmd, "child"); err != nil {
+		t.Errorf("Subcommand must not fail: %+v", err)
+	}
+
+	if _, err := executeCommandWithContext(ctx, rootCmd, "child", "grandchild"); err != nil {
+		t.Errorf("Command child must not fail: %+v", err)
+	}
+}
+
+func TestExecuteContextC(t *testing.T) {
+	ctx := context.TODO()
+
+	ctxRun := func(cmd *Command, args []string) {
+		if cmd.Context() != ctx {
+			t.Errorf("Command %q must have context when called with ExecuteContext", cmd.Use)
+		}
+	}
+
+	rootCmd := &Command{Use: "root", Run: ctxRun, PreRun: ctxRun}
+	childCmd := &Command{Use: "child", Run: ctxRun, PreRun: ctxRun}
+	granchildCmd := &Command{Use: "grandchild", Run: ctxRun, PreRun: ctxRun}
+
+	childCmd.AddCommand(granchildCmd)
+	rootCmd.AddCommand(childCmd)
+
+	if _, _, err := executeCommandWithContextC(ctx, rootCmd, ""); err != nil {
+		t.Errorf("Root command must not fail: %+v", err)
+	}
+
+	if _, _, err := executeCommandWithContextC(ctx, rootCmd, "child"); err != nil {
+		t.Errorf("Subcommand must not fail: %+v", err)
+	}
+
+	if _, _, err := executeCommandWithContextC(ctx, rootCmd, "child", "grandchild"); err != nil {
+		t.Errorf("Command child must not fail: %+v", err)
+	}
+}
+
+func TestExecute_NoContext(t *testing.T) {
+	run := func(cmd *Command, args []string) {
+		if cmd.Context() != context.Background() {
+			t.Errorf("Command %s must have background context", cmd.Use)
+		}
+	}
+
+	rootCmd := &Command{Use: "root", Run: run, PreRun: run}
+	childCmd := &Command{Use: "child", Run: run, PreRun: run}
+	granchildCmd := &Command{Use: "grandchild", Run: run, PreRun: run}
+
+	childCmd.AddCommand(granchildCmd)
+	rootCmd.AddCommand(childCmd)
+
+	if _, err := executeCommand(rootCmd, ""); err != nil {
+		t.Errorf("Root command must not fail: %+v", err)
+	}
+
+	if _, err := executeCommand(rootCmd, "child"); err != nil {
+		t.Errorf("Subcommand must not fail: %+v", err)
+	}
+
+	if _, err := executeCommand(rootCmd, "child", "grandchild"); err != nil {
+		t.Errorf("Command child must not fail: %+v", err)
+	}
+}
+
+func TestRootUnknownCommandSilenced(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
+	rootCmd.AddCommand(&Command{Use: "child", Run: emptyRun})
+
+	output, _ := executeCommand(rootCmd, "unknown")
+	if output != "" {
+		t.Errorf("Expected blank output, because of silenced usage.\nGot:\n %q\n", output)
+	}
+}
+
+func TestCommandAlias(t *testing.T) {
+	var timesCmdArgs []string
+	rootCmd := &Command{Use: "root", Args: NoArgs, Run: emptyRun}
+	echoCmd := &Command{
+		Use:     "echo",
+		Aliases: []string{"say", "tell"},
+		Args:    NoArgs,
+		Run:     emptyRun,
+	}
+	timesCmd := &Command{
+		Use:  "times",
+		Args: ExactArgs(2),
+		Run:  func(_ *Command, args []string) { timesCmdArgs = args },
+	}
+	echoCmd.AddCommand(timesCmd)
+	rootCmd.AddCommand(echoCmd)
+
+	output, err := executeCommand(rootCmd, "tell", "times", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(timesCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("timesCmdArgs expected: %v, got: %v", onetwo, got)
+	}
+}
+
+func TestEnablePrefixMatching(t *testing.T) {
+	EnablePrefixMatching = true
+
+	var aCmdArgs []string
+	rootCmd := &Command{Use: "root", Args: NoArgs, Run: emptyRun}
+	aCmd := &Command{
+		Use:  "aCmd",
+		Args: ExactArgs(2),
+		Run:  func(_ *Command, args []string) { aCmdArgs = args },
+	}
+	bCmd := &Command{Use: "bCmd", Args: NoArgs, Run: emptyRun}
+	rootCmd.AddCommand(aCmd, bCmd)
+
+	output, err := executeCommand(rootCmd, "a", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(aCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("aCmdArgs expected: %q, got: %q", onetwo, got)
+	}
+
+	EnablePrefixMatching = defaultPrefixMatching
+}
+
+func TestAliasPrefixMatching(t *testing.T) {
+	EnablePrefixMatching = true
+
+	var timesCmdArgs []string
+	rootCmd := &Command{Use: "root", Args: NoArgs, Run: emptyRun}
+	echoCmd := &Command{
+		Use:     "echo",
+		Aliases: []string{"say", "tell"},
+		Args:    NoArgs,
+		Run:     emptyRun,
+	}
+	timesCmd := &Command{
+		Use:  "times",
+		Args: ExactArgs(2),
+		Run:  func(_ *Command, args []string) { timesCmdArgs = args },
+	}
+	echoCmd.AddCommand(timesCmd)
+	rootCmd.AddCommand(echoCmd)
+
+	output, err := executeCommand(rootCmd, "sa", "times", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(timesCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("timesCmdArgs expected: %v, got: %v", onetwo, got)
+	}
+
+	EnablePrefixMatching = defaultPrefixMatching
+}
+
+// TestPlugin checks usage as plugin for another command such as kubectl.  The
+// executable is kubectl-plugin, but we run it as kubectl plugin. The help
+// text should reflect the way we run the command.
+func TestPlugin(t *testing.T) {
+	cmd := &Command{
+		Use:  "kubectl-plugin",
+		Args: NoArgs,
+		Annotations: map[string]string{
+			CommandDisplayNameAnnotation: "kubectl plugin",
+		},
+		Run: emptyRun,
+	}
+
+	cmdHelp, err := executeCommand(cmd, "-h")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, cmdHelp, "kubectl plugin [flags]")
+	checkStringContains(t, cmdHelp, "help for kubectl plugin")
+}
+
+// TestPlugin checks usage as plugin with sub commands.
+func TestPluginWithSubCommands(t *testing.T) {
+	rootCmd := &Command{
+		Use:  "kubectl-plugin",
+		Args: NoArgs,
+		Annotations: map[string]string{
+			CommandDisplayNameAnnotation: "kubectl plugin",
+		},
+	}
+
+	subCmd := &Command{Use: "sub [flags]", Args: NoArgs, Run: emptyRun}
+	rootCmd.AddCommand(subCmd)
+
+	rootHelp, err := executeCommand(rootCmd, "-h")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, rootHelp, "kubectl plugin [command]")
+	checkStringContains(t, rootHelp, "help for kubectl plugin")
+	checkStringContains(t, rootHelp, "kubectl plugin [command] --help")
+
+	childHelp, err := executeCommand(rootCmd, "sub", "-h")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, childHelp, "kubectl plugin sub [flags]")
+	checkStringContains(t, childHelp, "help for sub")
+
+	helpHelp, err := executeCommand(rootCmd, "help", "-h")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, helpHelp, "kubectl plugin help [path to command]")
+	checkStringContains(t, helpHelp, "kubectl plugin help [command]")
+}
+
+// TestChildSameName checks the correct behaviour of cobra in cases,
+// when an application with name "foo" and with subcommand "foo"
+// is executed with args "foo foo".
+func TestChildSameName(t *testing.T) {
+	var fooCmdArgs []string
+	rootCmd := &Command{Use: "foo", Args: NoArgs, Run: emptyRun}
+	fooCmd := &Command{
+		Use:  "foo",
+		Args: ExactArgs(2),
+		Run:  func(_ *Command, args []string) { fooCmdArgs = args },
+	}
+	barCmd := &Command{Use: "bar", Args: NoArgs, Run: emptyRun}
+	rootCmd.AddCommand(fooCmd, barCmd)
+
+	output, err := executeCommand(rootCmd, "foo", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(fooCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("fooCmdArgs expected: %v, got: %v", onetwo, got)
+	}
+}
+
+// TestGrandChildSameName checks the correct behaviour of cobra in cases,
+// when user has a root command and a grand child
+// with the same name.
+func TestGrandChildSameName(t *testing.T) {
+	var fooCmdArgs []string
+	rootCmd := &Command{Use: "foo", Args: NoArgs, Run: emptyRun}
+	barCmd := &Command{Use: "bar", Args: NoArgs, Run: emptyRun}
+	fooCmd := &Command{
+		Use:  "foo",
+		Args: ExactArgs(2),
+		Run:  func(_ *Command, args []string) { fooCmdArgs = args },
+	}
+	barCmd.AddCommand(fooCmd)
+	rootCmd.AddCommand(barCmd)
+
+	output, err := executeCommand(rootCmd, "bar", "foo", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(fooCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("fooCmdArgs expected: %v, got: %v", onetwo, got)
+	}
+}
+
+func TestFlagLong(t *testing.T) {
+	var cArgs []string
+	c := &Command{
+		Use:  "c",
+		Args: ArbitraryArgs,
+		Run:  func(_ *Command, args []string) { cArgs = args },
+	}
+
+	var intFlagValue int
+	var stringFlagValue string
+	c.Flags().IntVar(&intFlagValue, "intf", -1, "")
+	c.Flags().StringVar(&stringFlagValue, "sf", "", "")
+
+	output, err := executeCommand(c, "--intf=7", "--sf=abc", "one", "--", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if c.ArgsLenAtDash() != 1 {
+		t.Errorf("Expected ArgsLenAtDash: %v but got %v", 1, c.ArgsLenAtDash())
+	}
+	if intFlagValue != 7 {
+		t.Errorf("Expected intFlagValue: %v, got %v", 7, intFlagValue)
+	}
+	if stringFlagValue != "abc" {
+		t.Errorf("Expected stringFlagValue: %q, got %q", "abc", stringFlagValue)
+	}
+
+	got := strings.Join(cArgs, " ")
+	if got != onetwo {
+		t.Errorf("rootCmdArgs expected: %q, got: %q", onetwo, got)
+	}
+}
+
+func TestFlagShort(t *testing.T) {
+	var cArgs []string
+	c := &Command{
+		Use:  "c",
+		Args: ArbitraryArgs,
+		Run:  func(_ *Command, args []string) { cArgs = args },
+	}
+
+	var intFlagValue int
+	var stringFlagValue string
+	c.Flags().IntVarP(&intFlagValue, "intf", "i", -1, "")
+	c.Flags().StringVarP(&stringFlagValue, "sf", "s", "", "")
+
+	output, err := executeCommand(c, "-i", "7", "-sabc", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if intFlagValue != 7 {
+		t.Errorf("Expected flag value: %v, got %v", 7, intFlagValue)
+	}
+	if stringFlagValue != "abc" {
+		t.Errorf("Expected stringFlagValue: %q, got %q", "abc", stringFlagValue)
+	}
+
+	got := strings.Join(cArgs, " ")
+	if got != onetwo {
+		t.Errorf("rootCmdArgs expected: %q, got: %q", onetwo, got)
+	}
+}
+
+func TestChildFlag(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	var intFlagValue int
+	childCmd.Flags().IntVarP(&intFlagValue, "intf", "i", -1, "")
+
+	output, err := executeCommand(rootCmd, "child", "-i7")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if intFlagValue != 7 {
+		t.Errorf("Expected flag value: %v, got %v", 7, intFlagValue)
+	}
+}
+
+func TestChildFlagWithParentLocalFlag(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	var intFlagValue int
+	rootCmd.Flags().StringP("sf", "s", "", "")
+	childCmd.Flags().IntVarP(&intFlagValue, "intf", "i", -1, "")
+
+	_, err := executeCommand(rootCmd, "child", "-i7", "-sabc")
+	if err == nil {
+		t.Errorf("Invalid flag should generate error")
+	}
+
+	checkStringContains(t, err.Error(), "unknown shorthand")
+
+	if intFlagValue != 7 {
+		t.Errorf("Expected flag value: %v, got %v", 7, intFlagValue)
+	}
+}
+
+func TestFlagInvalidInput(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	rootCmd.Flags().IntP("intf", "i", -1, "")
+
+	_, err := executeCommand(rootCmd, "-iabc")
+	if err == nil {
+		t.Errorf("Invalid flag value should generate error")
+	}
+
+	checkStringContains(t, err.Error(), "invalid syntax")
+}
+
+func TestFlagBeforeCommand(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	var flagValue int
+	childCmd.Flags().IntVarP(&flagValue, "intf", "i", -1, "")
+
+	// With short flag.
+	_, err := executeCommand(rootCmd, "-i7", "child")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if flagValue != 7 {
+		t.Errorf("Expected flag value: %v, got %v", 7, flagValue)
+	}
+
+	// With long flag.
+	_, err = executeCommand(rootCmd, "--intf=8", "child")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if flagValue != 8 {
+		t.Errorf("Expected flag value: %v, got %v", 9, flagValue)
+	}
+}
+
+func TestStripFlags(t *testing.T) {
+	tests := []struct {
+		input  []string
+		output []string
+	}{
+		{
+			[]string{"foo", "bar"},
+			[]string{"foo", "bar"},
+		},
+		{
+			[]string{"foo", "--str", "-s"},
+			[]string{"foo"},
+		},
+		{
+			[]string{"-s", "foo", "--str", "bar"},
+			[]string{},
+		},
+		{
+			[]string{"-i10", "echo"},
+			[]string{"echo"},
+		},
+		{
+			[]string{"-i=10", "echo"},
+			[]string{"echo"},
+		},
+		{
+			[]string{"--int=100", "echo"},
+			[]string{"echo"},
+		},
+		{
+			[]string{"-ib", "echo", "-sfoo", "baz"},
+			[]string{"echo", "baz"},
+		},
+		{
+			[]string{"-i=baz", "bar", "-i", "foo", "blah"},
+			[]string{"bar", "blah"},
+		},
+		{
+			[]string{"--int=baz", "-sbar", "-i", "foo", "blah"},
+			[]string{"blah"},
+		},
+		{
+			[]string{"--bool", "bar", "-i", "foo", "blah"},
+			[]string{"bar", "blah"},
+		},
+		{
+			[]string{"-b", "bar", "-i", "foo", "blah"},
+			[]string{"bar", "blah"},
+		},
+		{
+			[]string{"--persist", "bar"},
+			[]string{"bar"},
+		},
+		{
+			[]string{"-p", "bar"},
+			[]string{"bar"},
+		},
+	}
+
+	c := &Command{Use: "c", Run: emptyRun}
+	c.PersistentFlags().BoolP("persist", "p", false, "")
+	c.Flags().IntP("int", "i", -1, "")
+	c.Flags().StringP("str", "s", "", "")
+	c.Flags().BoolP("bool", "b", false, "")
+
+	for i, test := range tests {
+		got := stripFlags(test.input, c)
+		if !reflect.DeepEqual(test.output, got) {
+			t.Errorf("(%v) Expected: %v, got: %v", i, test.output, got)
+		}
+	}
+}
+
+func TestDisableFlagParsing(t *testing.T) {
+	var cArgs []string
+	c := &Command{
+		Use:                "c",
+		DisableFlagParsing: true,
+		Run: func(_ *Command, args []string) {
+			cArgs = args
+		},
+	}
+
+	args := []string{"cmd", "-v", "-race", "-file", "foo.go"}
+	output, err := executeCommand(c, args...)
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if !reflect.DeepEqual(args, cArgs) {
+		t.Errorf("Expected: %v, got: %v", args, cArgs)
+	}
+}
+
+func TestPersistentFlagsOnSameCommand(t *testing.T) {
+	var rootCmdArgs []string
+	rootCmd := &Command{
+		Use:  "root",
+		Args: ArbitraryArgs,
+		Run:  func(_ *Command, args []string) { rootCmdArgs = args },
+	}
+
+	var flagValue int
+	rootCmd.PersistentFlags().IntVarP(&flagValue, "intf", "i", -1, "")
+
+	output, err := executeCommand(rootCmd, "-i7", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(rootCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("rootCmdArgs expected: %q, got %q", onetwo, got)
+	}
+	if flagValue != 7 {
+		t.Errorf("flagValue expected: %v, got %v", 7, flagValue)
+	}
+}
+
+// TestEmptyInputs checks,
+// if flags correctly parsed with blank strings in args.
+func TestEmptyInputs(t *testing.T) {
+	c := &Command{Use: "c", Run: emptyRun}
+
+	var flagValue int
+	c.Flags().IntVarP(&flagValue, "intf", "i", -1, "")
+
+	output, err := executeCommand(c, "", "-i7", "")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if flagValue != 7 {
+		t.Errorf("flagValue expected: %v, got %v", 7, flagValue)
+	}
+}
+
+func TestChildFlagShadowsParentPersistentFlag(t *testing.T) {
+	parent := &Command{Use: "parent", Run: emptyRun}
+	child := &Command{Use: "child", Run: emptyRun}
+
+	parent.PersistentFlags().Bool("boolf", false, "")
+	parent.PersistentFlags().Int("intf", -1, "")
+	child.Flags().String("strf", "", "")
+	child.Flags().Int("intf", -1, "")
+
+	parent.AddCommand(child)
+
+	childInherited := child.InheritedFlags()
+	childLocal := child.LocalFlags()
+
+	if childLocal.Lookup("strf") == nil {
+		t.Error(LocalFlags expected to contain "strf", got "nil")
+	}
+	if childInherited.Lookup("boolf") == nil {
+		t.Error(InheritedFlags expected to contain "boolf", got "nil")
+	}
+
+	if childInherited.Lookup("intf") != nil {
+		t.Errorf(InheritedFlags should not contain shadowed flag "intf")
+	}
+	if childLocal.Lookup("intf") == nil {
+		t.Error(LocalFlags expected to contain "intf", got "nil")
+	}
+}
+
+func TestPersistentFlagsOnChild(t *testing.T) {
+	var childCmdArgs []string
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{
+		Use:  "child",
+		Args: ArbitraryArgs,
+		Run:  func(_ *Command, args []string) { childCmdArgs = args },
+	}
+	rootCmd.AddCommand(childCmd)
+
+	var parentFlagValue int
+	var childFlagValue int
+	rootCmd.PersistentFlags().IntVarP(&parentFlagValue, "parentf", "p", -1, "")
+	childCmd.Flags().IntVarP(&childFlagValue, "childf", "c", -1, "")
+
+	output, err := executeCommand(rootCmd, "child", "-c7", "-p8", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	got := strings.Join(childCmdArgs, " ")
+	if got != onetwo {
+		t.Errorf("rootCmdArgs expected: %q, got: %q", onetwo, got)
+	}
+	if parentFlagValue != 8 {
+		t.Errorf("parentFlagValue expected: %v, got %v", 8, parentFlagValue)
+	}
+	if childFlagValue != 7 {
+		t.Errorf("childFlagValue expected: %v, got %v", 7, childFlagValue)
+	}
+}
+
+func TestRequiredFlags(t *testing.T) {
+	c := &Command{Use: "c", Run: emptyRun}
+	c.Flags().String("foo1", "", "")
+	assertNoErr(t, c.MarkFlagRequired("foo1"))
+	c.Flags().String("foo2", "", "")
+	assertNoErr(t, c.MarkFlagRequired("foo2"))
+	c.Flags().String("bar", "", "")
+
+	expected := fmt.Sprintf("required flag(s) %q, %q not set", "foo1", "foo2")
+
+	_, err := executeCommand(c)
+	got := err.Error()
+
+	if got != expected {
+		t.Errorf("Expected error: %q, got: %q", expected, got)
+	}
+}
+
+func TestPersistentRequiredFlags(t *testing.T) {
+	parent := &Command{Use: "parent", Run: emptyRun}
+	parent.PersistentFlags().String("foo1", "", "")
+	assertNoErr(t, parent.MarkPersistentFlagRequired("foo1"))
+	parent.PersistentFlags().String("foo2", "", "")
+	assertNoErr(t, parent.MarkPersistentFlagRequired("foo2"))
+	parent.Flags().String("foo3", "", "")
+
+	child := &Command{Use: "child", Run: emptyRun}
+	child.Flags().String("bar1", "", "")
+	assertNoErr(t, child.MarkFlagRequired("bar1"))
+	child.Flags().String("bar2", "", "")
+	assertNoErr(t, child.MarkFlagRequired("bar2"))
+	child.Flags().String("bar3", "", "")
+
+	parent.AddCommand(child)
+
+	expected := fmt.Sprintf("required flag(s) %q, %q, %q, %q not set", "bar1", "bar2", "foo1", "foo2")
+
+	_, err := executeCommand(parent, "child")
+	if err.Error() != expected {
+		t.Errorf("Expected %q, got %q", expected, err.Error())
+	}
+}
+
+func TestPersistentRequiredFlagsWithDisableFlagParsing(t *testing.T) {
+	// Make sure a required persistent flag does not break
+	// commands that disable flag parsing
+
+	parent := &Command{Use: "parent", Run: emptyRun}
+	parent.PersistentFlags().Bool("foo", false, "")
+	flag := parent.PersistentFlags().Lookup("foo")
+	assertNoErr(t, parent.MarkPersistentFlagRequired("foo"))
+
+	child := &Command{Use: "child", Run: emptyRun}
+	child.DisableFlagParsing = true
+
+	parent.AddCommand(child)
+
+	if _, err := executeCommand(parent, "--foo", "child"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Reset the flag or else it will remember the state from the previous command
+	flag.Changed = false
+	if _, err := executeCommand(parent, "child", "--foo"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Reset the flag or else it will remember the state from the previous command
+	flag.Changed = false
+	if _, err := executeCommand(parent, "child"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestInitHelpFlagMergesFlags(t *testing.T) {
+	usage := "custom flag"
+	rootCmd := &Command{Use: "root"}
+	rootCmd.PersistentFlags().Bool("help", false, "custom flag")
+	childCmd := &Command{Use: "child"}
+	rootCmd.AddCommand(childCmd)
+
+	childCmd.InitDefaultHelpFlag()
+	got := childCmd.Flags().Lookup("help").Usage
+	if got != usage {
+		t.Errorf("Expected the help flag from the root command with usage: %v\nGot the default with usage: %v", usage, got)
+	}
+}
+
+func TestHelpCommandExecuted(t *testing.T) {
+	rootCmd := &Command{Use: "root", Long: "Long description", Run: emptyRun}
+	rootCmd.AddCommand(&Command{Use: "child", Run: emptyRun})
+
+	output, err := executeCommand(rootCmd, "help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, rootCmd.Long)
+}
+
+func TestHelpCommandExecutedOnChild(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Long: "Long description", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	output, err := executeCommand(rootCmd, "help", "child")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, childCmd.Long)
+}
+
+func TestHelpCommandExecutedOnChildWithFlagThatShadowsParentFlag(t *testing.T) {
+	parent := &Command{Use: "parent", Run: emptyRun}
+	child := &Command{Use: "child", Run: emptyRun}
+	parent.AddCommand(child)
+
+	parent.PersistentFlags().Bool("foo", false, "parent foo usage")
+	parent.PersistentFlags().Bool("bar", false, "parent bar usage")
+	child.Flags().Bool("foo", false, "child foo usage") // This shadows parent's foo flag
+	child.Flags().Bool("baz", false, "child baz usage")
+
+	got, err := executeCommand(parent, "help", "child")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	expected := Usage:
+  parent child [flags]
+
+Flags:
+      --baz    child baz usage
+      --foo    child foo usage
+  -h, --help   help for child
+
+Global Flags:
+      --bar   parent bar usage
+
+
+	if got != expected {
+		t.Errorf("Help text mismatch.\nExpected:\n%s\n\nGot:\n%s\n", expected, got)
+	}
+}
+
+func TestSetHelpCommand(t *testing.T) {
+	c := &Command{Use: "c", Run: emptyRun}
+	c.AddCommand(&Command{Use: "empty", Run: emptyRun})
+
+	expected := "WORKS"
+	c.SetHelpCommand(&Command{
+		Use:   "help [command]",
+		Short: "Help about any command",
+		Long: Help provides help for any command in the application.
+	Simply type  + c.Name() +  help [path to command] for full details.,
+		Run: func(c *Command, _ []string) { c.Print(expected) },
+	})
+
+	got, err := executeCommand(c, "help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if got != expected {
+		t.Errorf("Expected to contain %q, got %q", expected, got)
+	}
+}
+
+func TestHelpFlagExecuted(t *testing.T) {
+	rootCmd := &Command{Use: "root", Long: "Long description", Run: emptyRun}
+
+	output, err := executeCommand(rootCmd, "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, rootCmd.Long)
+}
+
+func TestHelpFlagExecutedOnChild(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Long: "Long description", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	output, err := executeCommand(rootCmd, "child", "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, childCmd.Long)
+}
+
+// TestHelpFlagInHelp checks,
+// if '--help' flag is shown in help for child (executing parent help child),
+// that has no other flags.
+// Related to https://github.com/spf13/cobra/issues/302.
+func TestHelpFlagInHelp(t *testing.T) {
+	parentCmd := &Command{Use: "parent", Run: func(*Command, []string) {}}
+
+	childCmd := &Command{Use: "child", Run: func(*Command, []string) {}}
+	parentCmd.AddCommand(childCmd)
+
+	output, err := executeCommand(parentCmd, "help", "child")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "[flags]")
+}
+
+func TestFlagsInUsage(t *testing.T) {
+	rootCmd := &Command{Use: "root", Args: NoArgs, Run: func(*Command, []string) {}}
+	output, err := executeCommand(rootCmd, "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "[flags]")
+}
+
+func TestHelpExecutedOnNonRunnableChild(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Long: "Long description"}
+	rootCmd.AddCommand(childCmd)
+
+	output, err := executeCommand(rootCmd, "child")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, childCmd.Long)
+}
+
+func TestVersionFlagExecuted(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+
+	output, err := executeCommand(rootCmd, "--version", "arg1")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "root version 1.0.0")
+}
+
+func TestVersionFlagExecutedWithNoName(t *testing.T) {
+	rootCmd := &Command{Version: "1.0.0", Run: emptyRun}
+
+	output, err := executeCommand(rootCmd, "--version", "arg1")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "version 1.0.0")
+}
+
+func TestShortAndLongVersionFlagInHelp(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+
+	output, err := executeCommand(rootCmd, "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "-v, --version")
+}
+
+func TestLongVersionFlagOnlyInHelpWhenShortPredefined(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+	rootCmd.Flags().StringP("foo", "v", "", "not a version flag")
+
+	output, err := executeCommand(rootCmd, "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringOmits(t, output, "-v, --version")
+	checkStringContains(t, output, "--version")
+}
+
+func TestShorthandVersionFlagExecuted(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+
+	output, err := executeCommand(rootCmd, "-v", "arg1")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "root version 1.0.0")
+}
+
+func TestVersionTemplate(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+	rootCmd.SetVersionTemplate(customized version: {{.Version}})
+
+	output, err := executeCommand(rootCmd, "--version", "arg1")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "customized version: 1.0.0")
+}
+
+func TestShorthandVersionTemplate(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+	rootCmd.SetVersionTemplate(customized version: {{.Version}})
+
+	output, err := executeCommand(rootCmd, "-v", "arg1")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "customized version: 1.0.0")
+}
+
+func TestRootErrPrefixExecutedOnSubcommand(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	rootCmd.SetErrPrefix("root error prefix:")
+	rootCmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+
+	output, err := executeCommand(rootCmd, "sub", "--unknown-flag")
+	if err == nil {
+		t.Errorf("Expected error")
+	}
+
+	checkStringContains(t, output, "root error prefix: unknown flag: --unknown-flag")
+}
+
+func TestRootAndSubErrPrefix(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	subCmd := &Command{Use: "sub", Run: emptyRun}
+	rootCmd.AddCommand(subCmd)
+	rootCmd.SetErrPrefix("root error prefix:")
+	subCmd.SetErrPrefix("sub error prefix:")
+
+	if output, err := executeCommand(rootCmd, "--unknown-root-flag"); err == nil {
+		t.Errorf("Expected error")
+	} else {
+		checkStringContains(t, output, "root error prefix: unknown flag: --unknown-root-flag")
+	}
+
+	if output, err := executeCommand(rootCmd, "sub", "--unknown-sub-flag"); err == nil {
+		t.Errorf("Expected error")
+	} else {
+		checkStringContains(t, output, "sub error prefix: unknown flag: --unknown-sub-flag")
+	}
+}
+
+func TestVersionFlagExecutedOnSubcommand(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0"}
+	rootCmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+
+	output, err := executeCommand(rootCmd, "--version", "sub")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "root version 1.0.0")
+}
+
+func TestShorthandVersionFlagExecutedOnSubcommand(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0"}
+	rootCmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+
+	output, err := executeCommand(rootCmd, "-v", "sub")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, "root version 1.0.0")
+}
+
+func TestVersionFlagOnlyAddedToRoot(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+	rootCmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+
+	_, err := executeCommand(rootCmd, "sub", "--version")
+	if err == nil {
+		t.Errorf("Expected error")
+	}
+
+	checkStringContains(t, err.Error(), "unknown flag: --version")
+}
+
+func TestShortVersionFlagOnlyAddedToRoot(t *testing.T) {
+	rootCmd := &Command{Use: "root", Version: "1.0.0", Run: emptyRun}
+	rootCmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+
+	_, err := executeCommand(rootCmd, "sub", "-v")
+	if err == nil {
+		t.Errorf("Expected error")
+	}
+
+	checkStringContains(t, err.Error(), "unknown shorthand flag: 'v' in -v")
+}
+
+func TestVersionFlagOnlyExistsIfVersionNonEmpty(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+
+	_, err := executeCommand(rootCmd, "--version")
+	if err == nil {
+		t.Errorf("Expected error")
+	}
+	checkStringContains(t, err.Error(), "unknown flag: --version")
+}
+
+func TestShorthandVersionFlagOnlyExistsIfVersionNonEmpty(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+
+	_, err := executeCommand(rootCmd, "-v")
+	if err == nil {
+		t.Errorf("Expected error")
+	}
+	checkStringContains(t, err.Error(), "unknown shorthand flag: 'v' in -v")
+}
+
+func TestShorthandVersionFlagOnlyAddedIfShorthandNotDefined(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun, Version: "1.2.3"}
+	rootCmd.Flags().StringP("notversion", "v", "", "not a version flag")
+
+	_, err := executeCommand(rootCmd, "-v")
+	if err == nil {
+		t.Errorf("Expected error")
+	}
+	check(t, rootCmd.Flags().ShorthandLookup("v").Name, "notversion")
+	checkStringContains(t, err.Error(), "flag needs an argument: 'v' in -v")
+}
+
+func TestShorthandVersionFlagOnlyAddedIfVersionNotDefined(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun, Version: "1.2.3"}
+	rootCmd.Flags().Bool("version", false, "a different kind of version flag")
+
+	_, err := executeCommand(rootCmd, "-v")
+	if err == nil {
+		t.Errorf("Expected error")
+	}
+	checkStringContains(t, err.Error(), "unknown shorthand flag: 'v' in -v")
+}
+
+func TestUsageIsNotPrintedTwice(t *testing.T) {
+	var cmd = &Command{Use: "root"}
+	var sub = &Command{Use: "sub"}
+	cmd.AddCommand(sub)
+
+	output, _ := executeCommand(cmd, "")
+	if strings.Count(output, "Usage:") != 1 {
+		t.Error("Usage output is not printed exactly once")
+	}
+}
+
+func TestVisitParents(t *testing.T) {
+	c := &Command{Use: "app"}
+	sub := &Command{Use: "sub"}
+	dsub := &Command{Use: "dsub"}
+	sub.AddCommand(dsub)
+	c.AddCommand(sub)
+
+	total := 0
+	add := func(x *Command) {
+		total++
+	}
+	sub.VisitParents(add)
+	if total != 1 {
+		t.Errorf("Should have visited 1 parent but visited %d", total)
+	}
+
+	total = 0
+	dsub.VisitParents(add)
+	if total != 2 {
+		t.Errorf("Should have visited 2 parents but visited %d", total)
+	}
+
+	total = 0
+	c.VisitParents(add)
+	if total != 0 {
+		t.Errorf("Should have visited no parents but visited %d", total)
+	}
+}
+
+func TestSuggestions(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	timesCmd := &Command{
+		Use:        "times",
+		SuggestFor: []string{"counts"},
+		Run:        emptyRun,
+	}
+	rootCmd.AddCommand(timesCmd)
+
+	templateWithSuggestions := "Error: unknown command \"%s\" for \"root\"\n\nDid you mean this?\n\t%s\n\nRun 'root --help' for usage.\n"
+	templateWithoutSuggestions := "Error: unknown command \"%s\" for \"root\"\nRun 'root --help' for usage.\n"
+
+	tests := map[string]string{
+		"time":     "times",
+		"tiems":    "times",
+		"tims":     "times",
+		"timeS":    "times",
+		"rimes":    "times",
+		"ti":       "times",
+		"t":        "times",
+		"timely":   "times",
+		"ri":       "",
+		"timezone": "",
+		"foo":      "",
+		"counts":   "times",
+	}
+
+	for typo, suggestion := range tests {
+		for _, suggestionsDisabled := range []bool{true, false} {
+			rootCmd.DisableSuggestions = suggestionsDisabled
+
+			var expected string
+			output, _ := executeCommand(rootCmd, typo)
+
+			if suggestion == "" || suggestionsDisabled {
+				expected = fmt.Sprintf(templateWithoutSuggestions, typo)
+			} else {
+				expected = fmt.Sprintf(templateWithSuggestions, typo, suggestion)
+			}
+
+			if output != expected {
+				t.Errorf("Unexpected response.\nExpected:\n %q\nGot:\n %q\n", expected, output)
+			}
+		}
+	}
+}
+
+func TestCaseInsensitive(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun, Aliases: []string{"alternative"}}
+	granchildCmd := &Command{Use: "GRANDCHILD", Run: emptyRun, Aliases: []string{"ALIAS"}}
+
+	childCmd.AddCommand(granchildCmd)
+	rootCmd.AddCommand(childCmd)
+
+	tests := []struct {
+		args                []string
+		failWithoutEnabling bool
+	}{
+		{
+			args:                []string{"child"},
+			failWithoutEnabling: false,
+		},
+		{
+			args:                []string{"CHILD"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"chILD"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"CHIld"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"alternative"},
+			failWithoutEnabling: false,
+		},
+		{
+			args:                []string{"ALTERNATIVE"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"ALTernatIVE"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"alternatiVE"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"child", "GRANDCHILD"},
+			failWithoutEnabling: false,
+		},
+		{
+			args:                []string{"child", "grandchild"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"CHIld", "GRANdchild"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"alternative", "ALIAS"},
+			failWithoutEnabling: false,
+		},
+		{
+			args:                []string{"alternative", "alias"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"CHILD", "alias"},
+			failWithoutEnabling: true,
+		},
+		{
+			args:                []string{"CHIld", "aliAS"},
+			failWithoutEnabling: true,
+		},
+	}
+
+	for _, test := range tests {
+		for _, enableCaseInsensitivity := range []bool{true, false} {
+			EnableCaseInsensitive = enableCaseInsensitivity
+
+			output, err := executeCommand(rootCmd, test.args...)
+			expectedFailure := test.failWithoutEnabling && !enableCaseInsensitivity
+
+			if !expectedFailure && output != "" {
+				t.Errorf("Unexpected output: %v", output)
+			}
+			if !expectedFailure && err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+		}
+	}
+
+	EnableCaseInsensitive = defaultCaseInsensitive
+}
+
+// This test make sure we keep backwards-compatibility with respect
+// to command names case sensitivity behavior.
+func TestCaseSensitivityBackwardCompatibility(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun}
+
+	rootCmd.AddCommand(childCmd)
+	_, err := executeCommand(rootCmd, strings.ToUpper(childCmd.Use))
+	if err == nil {
+		t.Error("Expected error on calling a command in upper case while command names are case sensitive. Got nil.")
+	}
+
+}
+
+func TestRemoveCommand(t *testing.T) {
+	rootCmd := &Command{Use: "root", Args: NoArgs, Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+	rootCmd.RemoveCommand(childCmd)
+
+	_, err := executeCommand(rootCmd, "child")
+	if err == nil {
+		t.Error("Expected error on calling removed command. Got nil.")
+	}
+}
+
+func TestReplaceCommandWithRemove(t *testing.T) {
+	childUsed := 0
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	child1Cmd := &Command{
+		Use: "child",
+		Run: func(*Command, []string) { childUsed = 1 },
+	}
+	child2Cmd := &Command{
+		Use: "child",
+		Run: func(*Command, []string) { childUsed = 2 },
+	}
+	rootCmd.AddCommand(child1Cmd)
+	rootCmd.RemoveCommand(child1Cmd)
+	rootCmd.AddCommand(child2Cmd)
+
+	output, err := executeCommand(rootCmd, "child")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if childUsed == 1 {
+		t.Error("Removed command shouldn't be called")
+	}
+	if childUsed != 2 {
+		t.Error("Replacing command should have been called but didn't")
+	}
+}
+
+func TestDeprecatedCommand(t *testing.T) {
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	deprecatedCmd := &Command{
+		Use:        "deprecated",
+		Deprecated: "This command is deprecated",
+		Run:        emptyRun,
+	}
+	rootCmd.AddCommand(deprecatedCmd)
+
+	output, err := executeCommand(rootCmd, "deprecated")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	checkStringContains(t, output, deprecatedCmd.Deprecated)
+}
+
+func TestHooks(t *testing.T) {
+	var (
+		persPreArgs  string
+		preArgs      string
+		runArgs      string
+		postArgs     string
+		persPostArgs string
+	)
+
+	c := &Command{
+		Use: "c",
+		PersistentPreRun: func(_ *Command, args []string) {
+			persPreArgs = strings.Join(args, " ")
+		},
+		PreRun: func(_ *Command, args []string) {
+			preArgs = strings.Join(args, " ")
+		},
+		Run: func(_ *Command, args []string) {
+			runArgs = strings.Join(args, " ")
+		},
+		PostRun: func(_ *Command, args []string) {
+			postArgs = strings.Join(args, " ")
+		},
+		PersistentPostRun: func(_ *Command, args []string) {
+			persPostArgs = strings.Join(args, " ")
+		},
+	}
+
+	output, err := executeCommand(c, "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	for _, v := range []struct {
+		name string
+		got  string
+	}{
+		{"persPreArgs", persPreArgs},
+		{"preArgs", preArgs},
+		{"runArgs", runArgs},
+		{"postArgs", postArgs},
+		{"persPostArgs", persPostArgs},
+	} {
+		if v.got != onetwo {
+			t.Errorf("Expected %s %q, got %q", v.name, onetwo, v.got)
+		}
+	}
+}
+
+func TestPersistentHooks(t *testing.T) {
+	EnableTraverseRunHooks = true
+	testPersistentHooks(t, []string{
+		"parent PersistentPreRun",
+		"child PersistentPreRun",
+		"child PreRun",
+		"child Run",
+		"child PostRun",
+		"child PersistentPostRun",
+		"parent PersistentPostRun",
+	})
+
+	EnableTraverseRunHooks = false
+	testPersistentHooks(t, []string{
+		"child PersistentPreRun",
+		"child PreRun",
+		"child Run",
+		"child PostRun",
+		"child PersistentPostRun",
+	})
+}
+
+func testPersistentHooks(t *testing.T, expectedHookRunOrder []string) {
+	var hookRunOrder []string
+
+	validateHook := func(args []string, hookName string) {
+		hookRunOrder = append(hookRunOrder, hookName)
+		got := strings.Join(args, " ")
+		if onetwo != got {
+			t.Errorf("Expected %s %q, got %q", hookName, onetwo, got)
+		}
+	}
+
+	parentCmd := &Command{
+		Use: "parent",
+		PersistentPreRun: func(_ *Command, args []string) {
+			validateHook(args, "parent PersistentPreRun")
+		},
+		PreRun: func(_ *Command, args []string) {
+			validateHook(args, "parent PreRun")
+		},
+		Run: func(_ *Command, args []string) {
+			validateHook(args, "parent Run")
+		},
+		PostRun: func(_ *Command, args []string) {
+			validateHook(args, "parent PostRun")
+		},
+		PersistentPostRun: func(_ *Command, args []string) {
+			validateHook(args, "parent PersistentPostRun")
+		},
+	}
+
+	childCmd := &Command{
+		Use: "child",
+		PersistentPreRun: func(_ *Command, args []string) {
+			validateHook(args, "child PersistentPreRun")
+		},
+		PreRun: func(_ *Command, args []string) {
+			validateHook(args, "child PreRun")
+		},
+		Run: func(_ *Command, args []string) {
+			validateHook(args, "child Run")
+		},
+		PostRun: func(_ *Command, args []string) {
+			validateHook(args, "child PostRun")
+		},
+		PersistentPostRun: func(_ *Command, args []string) {
+			validateHook(args, "child PersistentPostRun")
+		},
+	}
+	parentCmd.AddCommand(childCmd)
+
+	output, err := executeCommand(parentCmd, "child", "one", "two")
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	for idx, exp := range expectedHookRunOrder {
+		if len(hookRunOrder) > idx {
+			if act := hookRunOrder[idx]; act != exp {
+				t.Errorf("Expected %q at %d, got %q", exp, idx, act)
+			}
+		} else {
+			t.Errorf("Expected %q at %d, got nothing", exp, idx)
+		}
+	}
+}
+
+// Related to https://github.com/spf13/cobra/issues/521.
+func TestGlobalNormFuncPropagation(t *testing.T) {
+	normFunc := func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		return pflag.NormalizedName(name)
+	}
+
+	rootCmd := &Command{Use: "root", Run: emptyRun}
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	rootCmd.SetGlobalNormalizationFunc(normFunc)
+	if reflect.ValueOf(normFunc).Pointer() != reflect.ValueOf(rootCmd.GlobalNormalizationFunc()).Pointer() {
+		t.Error("rootCmd seems to have a wrong normalization function")
+	}
+
+	if reflect.ValueOf(normFunc).Pointer() != reflect.ValueOf(childCmd.GlobalNormalizationFunc()).Pointer() {
+		t.Error("childCmd should have had the normalization function of rootCmd")
+	}
+}
+
+// Related to https://github.com/spf13/cobra/issues/521.
+func TestNormPassedOnLocal(t *testing.T) {
+	toUpper := func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		return pflag.NormalizedName(strings.ToUpper(name))
+	}
+
+	c := &Command{}
+	c.Flags().Bool("flagname", true, "this is a dummy flag")
+	c.SetGlobalNormalizationFunc(toUpper)
+	if c.LocalFlags().Lookup("flagname") != c.LocalFlags().Lookup("FLAGNAME") {
+		t.Error("Normalization function should be passed on to Local flag set")
+	}
+}
+
+// Related to https://github.com/spf13/cobra/issues/521.
+func TestNormPassedOnInherited(t *testing.T) {
+	toUpper := func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		return pflag.NormalizedName(strings.ToUpper(name))
+	}
+
+	c := &Command{}
+	c.SetGlobalNormalizationFunc(toUpper)
+
+	child1 := &Command{}
+	c.AddCommand(child1)
+
+	c.PersistentFlags().Bool("flagname", true, "")
+
+	child2 := &Command{}
+	c.AddCommand(child2)
+
+	inherited := child1.InheritedFlags()
+	if inherited.Lookup("flagname") == nil || inherited.Lookup("flagname") != inherited.Lookup("FLAGNAME") {
+		t.Error("Normalization function should be passed on to inherited flag set in command added before flag")
+	}
+
+	inherited = child2.InheritedFlags()
+	if inherited.Lookup("flagname") == nil || inherited.Lookup("flagname") != inherited.Lookup("FLAGNAME") {
+		t.Error("Normalization function should be passed on to inherited flag set in command added after flag")
+	}
+}
+
+// Related to https://github.com/spf13/cobra/issues/521.
+func TestConsistentNormalizedName(t *testing.T) {
+	toUpper := func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		return pflag.NormalizedName(strings.ToUpper(name))
+	}
+	n := func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		return pflag.NormalizedName(name)
+	}
+
+	c := &Command{}
+	c.Flags().Bool("flagname", true, "")
+	c.SetGlobalNormalizationFunc(toUpper)
+	c.SetGlobalNormalizationFunc(n)
+
+	if c.LocalFlags().Lookup("flagname") == c.LocalFlags().Lookup("FLAGNAME") {
+		t.Error("Normalizing flag names should not result in duplicate flags")
+	}
+}
+
+func TestFlagOnPflagCommandLine(t *testing.T) {
+	flagName := "flagOnCommandLine"
+	pflag.String(flagName, "", "about my flag")
+
+	c := &Command{Use: "c", Run: emptyRun}
+	c.AddCommand(&Command{Use: "child", Run: emptyRun})
+
+	output, _ := executeCommand(c, "--help")
+	checkStringContains(t, output, flagName)
+
+	resetCommandLineFlagSet()
+}
+
+// TestHiddenCommandExecutes checks,
+// if hidden commands run as intended.
+func TestHiddenCommandExecutes(t *testing.T) {
+	executed := false
+	c := &Command{
+		Use:    "c",
+		Hidden: true,
+		Run:    func(*Command, []string) { executed = true },
+	}
+
+	output, err := executeCommand(c)
+	if output != "" {
+		t.Errorf("Unexpected output: %v", output)
+	}
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if !executed {
+		t.Error("Hidden command should have been executed")
+	}
+}
+
+// test to ensure hidden commands do not show up in usage/help text
+func TestHiddenCommandIsHidden(t *testing.T) {
+	c := &Command{Use: "c", Hidden: true, Run: emptyRun}
+	if c.IsAvailableCommand() {
+		t.Errorf("Hidden command should be unavailable")
+	}
+}
+
+func TestCommandsAreSorted(t *testing.T) {
+	EnableCommandSorting = true
+
+	originalNames := []string{"middle", "zlast", "afirst"}
+	expectedNames := []string{"afirst", "middle", "zlast"}
+
+	var rootCmd = &Command{Use: "root"}
+
+	for _, name := range originalNames {
+		rootCmd.AddCommand(&Command{Use: name})
+	}
+
+	for i, c := range rootCmd.Commands() {
+		got := c.Name()
+		if expectedNames[i] != got {
+			t.Errorf("Expected: %s, got: %s", expectedNames[i], got)
+		}
+	}
+
+	EnableCommandSorting = defaultCommandSorting
+}
+
+func TestEnableCommandSortingIsDisabled(t *testing.T) {
+	EnableCommandSorting = false
+
+	originalNames := []string{"middle", "zlast", "afirst"}
+
+	var rootCmd = &Command{Use: "root"}
+
+	for _, name := range originalNames {
+		rootCmd.AddCommand(&Command{Use: name})
+	}
+
+	for i, c := range rootCmd.Commands() {
+		got := c.Name()
+		if originalNames[i] != got {
+			t.Errorf("expected: %s, got: %s", originalNames[i], got)
+		}
+	}
+
+	EnableCommandSorting = defaultCommandSorting
+}
+
+func TestUsageWithGroup(t *testing.T) {
+	var rootCmd = &Command{Use: "root", Short: "test", Run: emptyRun}
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+
+	rootCmd.AddGroup(&Group{ID: "group1", Title: "group1"})
+	rootCmd.AddGroup(&Group{ID: "group2", Title: "group2"})
+
+	rootCmd.AddCommand(&Command{Use: "cmd1", GroupID: "group1", Run: emptyRun})
+	rootCmd.AddCommand(&Command{Use: "cmd2", GroupID: "group2", Run: emptyRun})
+
+	output, err := executeCommand(rootCmd, "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// help should be ungrouped here
+	checkStringContains(t, output, "\nAdditional Commands:\n  help")
+	checkStringContains(t, output, "\ngroup1\n  cmd1")
+	checkStringContains(t, output, "\ngroup2\n  cmd2")
+}
+
+func TestUsageHelpGroup(t *testing.T) {
+	var rootCmd = &Command{Use: "root", Short: "test", Run: emptyRun}
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+
+	rootCmd.AddGroup(&Group{ID: "group", Title: "group"})
+	rootCmd.AddCommand(&Command{Use: "xxx", GroupID: "group", Run: emptyRun})
+	rootCmd.SetHelpCommandGroupID("group")
+
+	output, err := executeCommand(rootCmd, "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// now help should be grouped under "group"
+	checkStringOmits(t, output, "\nAdditional Commands:\n  help")
+	checkStringContains(t, output, "\ngroup\n  help")
+}
+
+func TestUsageCompletionGroup(t *testing.T) {
+	var rootCmd = &Command{Use: "root", Short: "test", Run: emptyRun}
+
+	rootCmd.AddGroup(&Group{ID: "group", Title: "group"})
+	rootCmd.AddGroup(&Group{ID: "help", Title: "help"})
+
+	rootCmd.AddCommand(&Command{Use: "xxx", GroupID: "group", Run: emptyRun})
+	rootCmd.SetHelpCommandGroupID("help")
+	rootCmd.SetCompletionCommandGroupID("group")
+
+	output, err := executeCommand(rootCmd, "--help")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// now completion should be grouped under "group"
+	checkStringOmits(t, output, "\nAdditional Commands:\n  completion")
+	checkStringContains(t, output, "\ngroup\n  completion")
+}
+
+
+======
+
+------------------
+ChatGPT:
+
+
+Generating Unit Tests for args.go in Cobra Library
+
+Based on the args.go source code provided, we will generate a series of unit tests to ensure comprehensive code coverage. The existing methods in the source file will be tested for their expected behavior.
+
+Existing Functions in args.go
+legacyArgs
+NoArgs
+OnlyValidArgs
+ArbitraryArgs
+MinimumNArgs
+MaximumNArgs
+ExactArgs
+RangeArgs
+MatchAll
+ExactValidArgs
+Test File: args_test.go
+go
+Copy code
+package cobra
+
+import (
+	"fmt"
+	"testing"
+)
+
+// Mock Command for testing
+func newMockCommand(use string, args []string, hasSubCommands bool, validArgs []string, hasParent bool) *Command {
+	cmd := &Command{
+		Use:      use,
+		ValidArgs: validArgs,
+		Run:      emptyRun,
+	}
+	if hasSubCommands {
+		cmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+	}
+	if hasParent {
+		parentCmd := &Command{Use: "parent", Run: emptyRun}
+		parentCmd.AddCommand(cmd)
+	}
+	return cmd
+}
+
+func TestLegacyArgs(t *testing.T) {
+	tests := []struct {
+		name           string
+		cmd            *Command
+		args           []string
+		expectedOutput string
+		expectError    bool
+	}{
+		{
+			name:        "No subcommands, no error",
+			cmd:         newMockCommand("test", nil, false, nil, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "With subcommands, no args, no error",
+			cmd:         newMockCommand("test", nil, true, nil, false),
+			args:        []string{},
+			expectError: false,
+		},
+		{
+			name:           "Root command with subcommands, invalid arg",
+			cmd:            newMockCommand("test", nil, true, nil, false),
+			args:           []string{"invalid"},
+			expectedOutput: "unknown command \"invalid\" for \"test\"\n",
+			expectError:    true,
+		},
+		{
+			name:        "Subcommand with arbitrary args",
+			cmd:         newMockCommand("test", nil, false, nil, true),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := legacyArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+			if tt.expectError && err.Error() != tt.expectedOutput {
+				t.Fatalf("expected output: %v, got: %v", tt.expectedOutput, err.Error())
+			}
+		})
+	}
+}
+
+func TestNoArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		expectError bool
+	}{
+		{"No arguments", []string{}, false},
+		{"With arguments", []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NoArgs(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestOnlyValidArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		expectError bool
+	}{
+		{
+			name:        "Valid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "Invalid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"invalid"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := OnlyValidArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestArbitraryArgs(t *testing.T) {
+	cmd := newMockCommand("test", nil, false, nil, false)
+	err := ArbitraryArgs(cmd, []string{"arg1"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestMinimumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Minimum args met", 1, []string{"arg1"}, false},
+		{"Minimum args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MinimumNArgs(tt.minArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMaximumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Maximum args not exceeded", 2, []string{"arg1"}, false},
+		{"Maximum args exceeded", 1, []string{"arg1", "arg2"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MaximumNArgs(tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestExactArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		exactArgs   int
+		args        []string
+		expectError bool
+	}{
+		{"Exact args met", 1, []string{"arg1"}, false},
+		{"Exact args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ExactArgs(tt.exactArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestRangeArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Args within range", 1, 2, []string{"arg1"}, false},
+		{"Args below range", 2, 3, []string{"arg1"}, true},
+		{"Args above range", 1, 2, []string{"arg1", "arg2", "arg3"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := RangeArgs(tt.minArgs, tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMatchAll(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		conditions  []PositionalArgs
+		expectError bool
+	}{
+		{
+			name:        "All conditions met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{NoArgs, OnlyValidArgs},
+			expectError: false,
+		},
+		{
+			name:        "One condition not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{ExactArgs(2)},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MatchAll(tt.conditions...)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestExactValidArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		exactArgs   int
+		args        []string
+		expectError bool
+	}{
+		{
+			name:        "Exact valid args met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   1,
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "Exact valid args not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   2,
+			args:        []string{"arg1"},
+			expectError: true,
+		},
+		{
+			name:        "Invalid args",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   1,
+			args:        []string{"invalid"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ExactValidArgs(tt.exactArgs)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+Running the Tests
+
+To run these tests, ensure that you have go test set up correctly in your environment. Navigate to the directory containing args_test.go and run the following command:
+
+sh
+Copy code
+go test -v
+
+
+This will execute all the test cases and provide detailed output for each test, indicating whether it passed or failed.
+
+Key Points
+The tests cover various scenarios for each function to ensure their robustness.
+Mock commands are used to simulate different command configurations.
+The t.Run function is used to create sub-tests for better organization and readability.
+Error handling and expected outputs are checked rigorously to ensure the functions behave as intended.
+
+Feel free to adjust the test cases or add more to cover additional edge cases as needed.
+------------------
+You:
+
+
+seems the only error im getting is:
+
+=== RUN   TestNoArgs/With_arguments
+--- FAIL: TestNoArgs (0.00s)
+    --- PASS: TestNoArgs/No_arguments (0.00s)
+    --- FAIL: TestNoArgs/With_arguments (0.00s)
+panic: runtime error: invalid memory address or nil pointer dereference [recovered]
+	panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x2a8 pc=0x611a77]
+
+goroutine 20 [running]:
+testing.tRunner.func1.2({0x691a60, 0x8f3110})
+	/usr/local/go/src/testing/testing.go:1631 +0x24a
+testing.tRunner.func1()
+	/usr/local/go/src/testing/testing.go:1634 +0x377
+panic({0x691a60?, 0x8f3110?})
+	/usr/local/go/src/runtime/panic.go:770 +0x132
+github.com/spf13/cobra.(*Command).HasParent(...)
+	/home/pabs/GitRepos/UT_Grad_School/test-repos/test-cobra/command.go:1640
+github.com/spf13/cobra.(*Command).CommandPath(0x0)
+	/home/pabs/GitRepos/UT_Grad_School/test-repos/test-cobra/command.go:1430 +0x17
+github.com/spf13/cobra.NoArgs(0x603?, {0xc000033c10, 0x8a1c08?, 0x8e4bc0?})
+	/home/pabs/GitRepos/UT_Grad_School/test-repos/test-cobra/args.go:44 +0x33
+github.com/spf13/cobra.TestNoArgs.func1(0xc0000d1d40)
+	/home/pabs/GitRepos/UT_Grad_School/test-repos/test-cobra/args-gpt_test.go:84 +0x33
+testing.tRunner(0xc0000d1d40, 0xc000033ca0)
+	/usr/local/go/src/testing/testing.go:1689 +0xfb
+created by testing.(*T).Run in goroutine 18
+	/usr/local/go/src/testing/testing.go:1742 +0x390
+FAIL	github.com/spf13/cobra	0.005s
+
+------------------
+ChatGPT:
+
+
+The error indicates that the NoArgs function is attempting to dereference a nil pointer, specifically the *Command that is passed to it. In the test, we need to ensure that a non-nil *Command is provided.
+
+Let's modify the TestNoArgs test case to pass a non-nil *Command to NoArgs.
+
+Here's the updated TestNoArgs function:
+
+go
+Copy code
+func TestNoArgs(t *testing.T) {
+    cmd := newMockCommand("test", nil, false, nil, false) // Ensure a non-nil Command is provided
+
+    tests := []struct {
+        name        string
+        args        []string
+        expectError bool
+    }{
+        {"No arguments", []string{}, false},
+        {"With arguments", []string{"arg1"}, true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := NoArgs(cmd, tt.args) // Pass the command to NoArgs
+            if (err != nil) != tt.expectError {
+                t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+            }
+        })
+    }
+}
+
+
+This ensures that the cmd is always a valid *Command when calling NoArgs. Now, let's rerun the tests to see if this resolves the issue.
+
+Running the Tests
+
+To run these tests, ensure that you have go test set up correctly in your environment. Navigate to the directory containing args_test.go and run the following command:
+
+sh
+Copy code
+go test -v
+
+
+This should execute all the test cases and provide detailed output for each test, indicating whether it passed or failed.
+------------------
+You:
+
+
+how do i only run that test file and not all the others
+------------------
+ChatGPT:
+
+
+To run tests from a specific file in Go, you can use the -run flag with the go test command to specify the test functions or use the filename directly. Here are the steps:
+
+Navigate to the directory containing your test file:
+
+sh
+Copy code
+cd /path/to/your/test/directory
+
+
+Run tests from a specific file:
+
+sh
+Copy code
+go test -v -run ^TestNoArgs$ your_test_file.go
+
+
+Here's what each part of the command does:
+
+-v enables verbose output.
+-run allows you to specify a regular expression to match test names. ^TestNoArgs$ ensures that only TestNoArgs is run.
+your_test_file.go is the name of your test file (replace this with the actual file name, e.g., args_test.go).
+
+If you want to run all tests within that specific file without specifying each test function, you can simply specify the file name:
+
+sh
+Copy code
+go test -v your_test_file.go
+
+
+This will run all the tests defined in your_test_file.go.
+
+Example
+
+If your test file is named args_test.go, you would run:
+
+sh
+Copy code
+go test -v -run ^TestNoArgs$ args_test.go
+
+
+or to run all tests in args_test.go:
+
+sh
+Copy code
+go test -v args_test.go
+
+------------------
+You:
+
+
+getting:
+pabs:test-cobra$ go test -v args-gpt_test.go
+# command-line-arguments [command-line-arguments.test]
+./args-gpt_test.go:8:106: undefined: Command
+./args-gpt_test.go:9:10: undefined: Command
+./args-gpt_test.go:12:13: undefined: emptyRun
+./args-gpt_test.go:15:19: undefined: Command
+./args-gpt_test.go:15:44: undefined: emptyRun
+./args-gpt_test.go:18:17: undefined: Command
+./args-gpt_test.go:18:45: undefined: emptyRun
+./args-gpt_test.go:27:19: undefined: Command
+./args-gpt_test.go:61:11: undefined: legacyArgs
+./args-gpt_test.go:86:20: undefined: NoArgs
+./args-gpt_test.go:86:20: too many errors
+FAIL	command-line-arguments [build failed]
+FAIL
+
+------------------
+ChatGPT:
+
+
+The error you're encountering indicates that the Command, emptyRun, legacyArgs, and NoArgs identifiers are not defined in the scope of your test file. To resolve this, ensure that you are importing the correct packages and that your test file has access to the necessary definitions.
+
+Here’s a checklist to ensure your test file is correctly set up:
+
+Import the required packages:
+Ensure that your test file imports the cobra package and any other necessary packages.
+
+Define or import the required identifiers:
+Ensure that Command, emptyRun, legacyArgs, and NoArgs are defined or imported correctly.
+
+Run the tests with the correct package context:
+Ensure that you run the test in a context where these identifiers are accessible.
+
+Here’s an example structure of what your test file might look like:
+
+go
+Copy code
+package main
+
+import (
+    "testing"
+    "github.com/spf13/cobra"
+)
+
+func TestNoArgs(t *testing.T) {
+    tests := []struct {
+        name string
+        args []string
+    }{
+        {"No arguments", []string{}},
+        {"With arguments", []string{"arg1"}},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            cmd := &cobra.Command{
+                Use: "test",
+                Run: emptyRun,
+                Args: cobra.NoArgs,
+            }
+            err := cmd.Execute()
+            if (err != nil) != (len(tt.args) > 0) {
+                t.Errorf("expected no error, got %v", err)
+            }
+        })
+    }
+}
+
+func emptyRun(cmd *cobra.Command, args []string) {
+    // Dummy function to satisfy the Run field
+}
+
+
+Ensure the following:
+
+The main package name should be the same as the package where your Command, emptyRun, legacyArgs, and NoArgs are defined.
+The necessary functions and structs are either defined in the test file or imported from the appropriate package.
+Running the Test
+
+Once the file is correctly set up, you can run the test with:
+
+sh
+Copy code
+go test -v args-gpt_test.go
+
+
+If your tests are in a package other than main, make sure to specify the package name accordingly.
+
+If you encounter further issues, please provide the relevant code or additional context for more specific assistance.
+------------------
+You:
+
+
+it is in the same package:
+
+Here is what i have:
+
+package cobra
+
+import (
+	"testing"
+)
+
+// Mock Command for testing
+func newMockCommand(use string, args []string, hasSubCommands bool, validArgs []string, hasParent bool) *Command {
+	cmd := &Command{
+		Use:      use,
+		ValidArgs: validArgs,
+		Run:      emptyRun,
+	}
+	if hasSubCommands {
+		cmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+	}
+	if hasParent {
+		parentCmd := &Command{Use: "parent", Run: emptyRun}
+		parentCmd.AddCommand(cmd)
+	}
+	return cmd
+}
+
+func TestLegacyArgs(t *testing.T) {
+	tests := []struct {
+		name           string
+		cmd            *Command
+		args           []string
+		expectedOutput string
+		expectError    bool
+	}{
+		{
+			name:        "No subcommands, no error",
+			cmd:         newMockCommand("test", nil, false, nil, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "With subcommands, no args, no error",
+			cmd:         newMockCommand("test", nil, true, nil, false),
+			args:        []string{},
+			expectError: false,
+		},
+		{
+			name:           "Root command with subcommands, invalid arg",
+			cmd:            newMockCommand("test", nil, true, nil, false),
+			args:           []string{"invalid"},
+			expectedOutput: "unknown command \"invalid\" for \"test\"\n",
+			expectError:    true,
+		},
+		{
+			name:        "Subcommand with arbitrary args",
+			cmd:         newMockCommand("test", nil, false, nil, true),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := legacyArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+			if tt.expectError && err.Error() != tt.expectedOutput {
+				t.Fatalf("expected output: %v, got: %v", tt.expectedOutput, err.Error())
+			}
+		})
+	}
+}
+
+func TestNoArgs(t *testing.T) {
+    cmd := newMockCommand("test", nil, false, nil, false) // Ensure a non-nil Command is provided
+
+    tests := []struct {
+        name        string
+        args        []string
+        expectError bool
+    }{
+        {"No arguments", []string{}, false},
+        {"With arguments", []string{"arg1"}, true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := NoArgs(cmd, tt.args) // Pass the command to NoArgs
+            if (err != nil) != tt.expectError {
+                t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+            }
+        })
+    }
+}
+
+func TestOnlyValidArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		expectError bool
+	}{
+		{
+			name:        "Valid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "Invalid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"invalid"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := OnlyValidArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestArbitraryArgs(t *testing.T) {
+	cmd := newMockCommand("test", nil, false, nil, false)
+	err := ArbitraryArgs(cmd, []string{"arg1"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestMinimumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Minimum args met", 1, []string{"arg1"}, false},
+		{"Minimum args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MinimumNArgs(tt.minArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMaximumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Maximum args not exceeded", 2, []string{"arg1"}, false},
+		{"Maximum args exceeded", 1, []string{"arg1", "arg2"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MaximumNArgs(tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestExactArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		exactArgs   int
+		args        []string
+		expectError bool
+	}{
+		{"Exact args met", 1, []string{"arg1"}, false},
+		{"Exact args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ExactArgs(tt.exactArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestRangeArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Args within range", 1, 2, []string{"arg1"}, false},
+		{"Args below range", 2, 3, []string{"arg1"}, true},
+		{"Args above range", 1, 2, []string{"arg1", "arg2", "arg3"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := RangeArgs(tt.minArgs, tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMatchAll(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		conditions  []PositionalArgs
+		expectError bool
+	}{
+		{
+			name:        "All conditions met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{NoArgs, OnlyValidArgs},
+			expectError: false,
+		},
+		{
+			name:        "One condition not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{ExactArgs(2)},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MatchAll(tt.conditions...)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestExactValidArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		exactArgs   int
+		args        []string
+		expectError bool
+	}{
+		{
+			name:        "Exact valid args met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   1,
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "Exact valid args not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   2,
+			args:        []string{"arg1"},
+			expectError: true,
+		},
+		{
+			name:        "Invalid args",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   1,
+			args:        []string{"invalid"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ExactValidArgs(tt.exactArgs)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+ 
+------------------
+ChatGPT:
+
+
+The errors you're encountering are because the Command, emptyRun, legacyArgs, and NoArgs identifiers are not defined in the test file scope. To ensure that they are correctly referenced, make sure you have the necessary imports and definitions in place. Additionally, it appears you're testing in the context of the cobra package, so ensure all required elements are properly imported or defined within the package.
+
+Updated Code Example
+
+Here is an updated version of your test file, ensuring all necessary elements are defined or imported:
+
+go
+Copy code
+package cobra
+
+import (
+	"testing"
+)
+
+// Mock Command for testing
+func newMockCommand(use string, args []string, hasSubCommands bool, validArgs []string, hasParent bool) *Command {
+	cmd := &Command{
+		Use:      use,
+		ValidArgs: validArgs,
+		Run:      emptyRun,
+	}
+	if hasSubCommands {
+		cmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+	}
+	if hasParent {
+		parentCmd := &Command{Use: "parent", Run: emptyRun}
+		parentCmd.AddCommand(cmd)
+	}
+	return cmd
+}
+
+func emptyRun(cmd *Command, args []string) {
+	// Dummy function to satisfy the Run field
+}
+
+func TestLegacyArgs(t *testing.T) {
+	tests := []struct {
+		name           string
+		cmd            *Command
+		args           []string
+		expectedOutput string
+		expectError    bool
+	}{
+		{
+			name:        "No subcommands, no error",
+			cmd:         newMockCommand("test", nil, false, nil, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "With subcommands, no args, no error",
+			cmd:         newMockCommand("test", nil, true, nil, false),
+			args:        []string{},
+			expectError: false,
+		},
+		{
+			name:           "Root command with subcommands, invalid arg",
+			cmd:            newMockCommand("test", nil, true, nil, false),
+			args:           []string{"invalid"},
+			expectedOutput: "unknown command \"invalid\" for \"test\"\n",
+			expectError:    true,
+		},
+		{
+			name:        "Subcommand with arbitrary args",
+			cmd:         newMockCommand("test", nil, false, nil, true),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := legacyArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+			if tt.expectError && err.Error() != tt.expectedOutput {
+				t.Fatalf("expected output: %v, got: %v", tt.expectedOutput, err.Error())
+			}
+		})
+	}
+}
+
+func TestNoArgs(t *testing.T) {
+	cmd := newMockCommand("test", nil, false, nil, false) // Ensure a non-nil Command is provided
+
+	tests := []struct {
+		name        string
+		args        []string
+		expectError bool
+	}{
+		{"No arguments", []string{}, false},
+		{"With arguments", []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NoArgs(cmd, tt.args) // Pass the command to NoArgs
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestOnlyValidArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		expectError bool
+	}{
+		{
+			name:        "Valid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "Invalid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"invalid"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := OnlyValidArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestArbitraryArgs(t *testing.T) {
+	cmd := newMockCommand("test", nil, false, nil, false)
+	err := ArbitraryArgs(cmd, []string{"arg1"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestMinimumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Minimum args met", 1, []string{"arg1"}, false},
+		{"Minimum args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MinimumNArgs(tt.minArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMaximumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Maximum args not exceeded", 2, []string{"arg1"}, false},
+		{"Maximum args exceeded", 1, []string{"arg1", "arg2"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MaximumNArgs(tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestExactArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		exactArgs   int
+		args        []string
+		expectError bool
+	}{
+		{"Exact args met", 1, []string{"arg1"}, false},
+		{"Exact args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ExactArgs(tt.exactArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestRangeArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Args within range", 1, 2, []string{"arg1"}, false},
+		{"Args below range", 2, 3, []string{"arg1"}, true},
+		{"Args above range", 1, 2, []string{"arg1", "arg2", "arg3"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := RangeArgs(tt.minArgs, tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMatchAll(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		conditions  []PositionalArgs
+		expectError bool
+	}{
+		{
+			name:        "All conditions met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{NoArgs, OnlyValidArgs},
+			expectError: false,
+		},
+		{
+			name:        "One condition not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{ExactArgs(2)},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MatchAll(tt.conditions...)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestExactValidArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		exactArgs   int
+		args        []string
+		expectError bool
+	}{
+		{
+			name:        "Exact valid args met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   1,
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "Exact valid args not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   2,
+			args:        []string{"arg1"},
+			expectError: true,
+		},
+		{
+			name:        "Invalid args",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			exactArgs:   1,
+			args:        []string{"invalid"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ExactValidArgs(tt.exactArgs)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+Running the Test
+
+Run the test with the following command, specifying the package and the test file:
+
+sh
+Copy code
+go test -v ./path/to/cobra/args-gpt_test.go
+
+
+Make sure the args-gpt_test.go file is in the same directory as your cobra package. Adjust the path accordingly if it’s located in a subdirectory.
+
+If you continue to experience issues, double-check that all functions (Command, emptyRun, legacyArgs, NoArgs, etc.) are defined and accessible within the cobra package.
+------------------
+You:
+
+
+--- FAIL: TestLegacyArgs (0.00s)
+    --- FAIL: TestLegacyArgs/Root_command_with_subcommands,_invalid_arg (0.00s)
+        args-gpt_test.go:70: expected output: unknown command "invalid" for "test"
+            , got: unknown command "invalid" for "test"
+
+------------------
+ChatGPT:
+
+
+The error message you are seeing indicates that there is a minor discrepancy between the expected output and the actual output. This could be due to a difference in formatting, such as an extra newline character or a difference in whitespace.
+
+To diagnose and fix this issue, you can print the expected and actual outputs to see what might be causing the discrepancy. Here's an updated version of the test that includes additional logging for debugging:
+
+Updated Test Code
+go
+Copy code
+package cobra
+
+import (
+	"strings"
+	"testing"
+)
+
+// Mock Command for testing
+func newMockCommand(use string, args []string, hasSubCommands bool, validArgs []string, hasParent bool) *Command {
+	cmd := &Command{
+		Use:      use,
+		ValidArgs: validArgs,
+		Run:      emptyRun,
+	}
+	if hasSubCommands {
+		cmd.AddCommand(&Command{Use: "sub", Run: emptyRun})
+	}
+	if hasParent {
+		parentCmd := &Command{Use: "parent", Run: emptyRun}
+		parentCmd.AddCommand(cmd)
+	}
+	return cmd
+}
+
+func emptyRun(cmd *Command, args []string) {
+	// Dummy function to satisfy the Run field
+}
+
+func TestLegacyArgs(t *testing.T) {
+	tests := []struct {
+		name           string
+		cmd            *Command
+		args           []string
+		expectedOutput string
+		expectError    bool
+	}{
+		{
+			name:        "No subcommands, no error",
+			cmd:         newMockCommand("test", nil, false, nil, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "With subcommands, no args, no error",
+			cmd:         newMockCommand("test", nil, true, nil, false),
+			args:        []string{},
+			expectError: false,
+		},
+		{
+			name:           "Root command with subcommands, invalid arg",
+			cmd:            newMockCommand("test", nil, true, nil, false),
+			args:           []string{"invalid"},
+			expectedOutput: "unknown command \"invalid\" for \"test\"\n",
+			expectError:    true,
+		},
+		{
+			name:        "Subcommand with arbitrary args",
+			cmd:         newMockCommand("test", nil, false, nil, true),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := legacyArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+			if tt.expectError {
+				actualOutput := err.Error()
+				// Compare trimmed outputs to avoid issues with trailing whitespace or newline
+				if strings.TrimSpace(actualOutput) != strings.TrimSpace(tt.expectedOutput) {
+					t.Fatalf("expected output: %q, got: %q", tt.expectedOutput, actualOutput)
+				}
+			}
+		})
+	}
+}
+
+func TestNoArgs(t *testing.T) {
+	cmd := newMockCommand("test", nil, false, nil, false) // Ensure a non-nil Command is provided
+
+	tests := []struct {
+		name        string
+		args        []string
+		expectError bool
+	}{
+		{"No arguments", []string{}, false},
+		{"With arguments", []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NoArgs(cmd, tt.args) // Pass the command to NoArgs
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestOnlyValidArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		expectError bool
+	}{
+		{
+			name:        "Valid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			expectError: false,
+		},
+		{
+			name:        "Invalid arguments",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"invalid"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := OnlyValidArgs(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestArbitraryArgs(t *testing.T) {
+	cmd := newMockCommand("test", nil, false, nil, false)
+	err := ArbitraryArgs(cmd, []string{"arg1"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestMinimumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Minimum args met", 1, []string{"arg1"}, false},
+		{"Minimum args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MinimumNArgs(tt.minArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMaximumNArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Maximum args not exceeded", 2, []string{"arg1"}, false},
+		{"Maximum args exceeded", 1, []string{"arg1", "arg2"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MaximumNArgs(tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestExactArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		exactArgs   int
+		args        []string
+		expectError bool
+	}{
+		{"Exact args met", 1, []string{"arg1"}, false},
+		{"Exact args not met", 2, []string{"arg1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ExactArgs(tt.exactArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestRangeArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		minArgs     int
+		maxArgs     int
+		args        []string
+		expectError bool
+	}{
+		{"Args within range", 1, 2, []string{"arg1"}, false},
+		{"Args below range", 2, 3, []string{"arg1"}, true},
+		{"Args above range", 1, 2, []string{"arg1", "arg2", "arg3"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := RangeArgs(tt.minArgs, tt.maxArgs)(nil, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestMatchAll(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		conditions  []PositionalArgs
+		expectError bool
+	}{
+		{
+			name:        "All conditions met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{NoArgs, OnlyValidArgs},
+			expectError: false,
+		},
+		{
+			name:        "One condition not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{ExactArgs(2)},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MatchAll(tt.conditions...)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+
+------------------
+You:
+
+
+--- FAIL: TestMatchAll (0.00s)
+    --- FAIL: TestMatchAll/All_conditions_met (0.00s)
+        args-gpt_test.go:251: expected error: false, got: unknown command "arg1" for "test"
+
+------------------
+ChatGPT:
+
+
+The error message indicates that the NoArgs condition is not being met in the TestMatchAll test case, as it is returning an error indicating that an argument was provided when it should not have been.
+
+To address this issue, you can modify the test case to ensure that the command and arguments align with the NoArgs condition, which expects no arguments to be passed. Here’s the updated TestMatchAll function with an adjustment to the test cases:
+
+Updated TestMatchAll
+go
+Copy code
+func TestMatchAll(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         *Command
+		args        []string
+		conditions  []PositionalArgs
+		expectError bool
+	}{
+		{
+			name:        "All conditions met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{},
+			conditions:  []PositionalArgs{NoArgs, OnlyValidArgs},
+			expectError: false,
+		},
+		{
+			name:        "One condition not met",
+			cmd:         newMockCommand("test", nil, false, []string{"arg1"}, false),
+			args:        []string{"arg1"},
+			conditions:  []PositionalArgs{ExactArgs(2)},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MatchAll(tt.conditions...)(tt.cmd, tt.args)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("expected error: %v, got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+
+In the updated TestMatchAll function:
+
+The first test case "All conditions met" has been modified to pass an empty argument slice args: []string{} to meet the NoArgs condition.
+The second test case "One condition not met" remains the same, as it tests for failure when the conditions are not met.
+
+This should resolve the issue with the NoArgs condition not being met in the TestMatchAll test case.
+------------------
