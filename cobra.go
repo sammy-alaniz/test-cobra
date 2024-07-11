@@ -227,6 +227,10 @@ func stringInSlice(a string, list []string) bool {
 	return false
 }
 
+var exit = func(code int) {
+	os.Exit(code)
+}
+
 // CheckErr prints the msg with the prefix 'Error:' and exits with error code 1. If the msg is nil, it does nothing.
 func CheckErr(msg interface{}) {
 	if msg != nil {

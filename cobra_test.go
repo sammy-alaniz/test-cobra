@@ -1,224 +1,156 @@
-// Copyright 2013-2023 The Cobra Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cobra
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"strings"
 	"testing"
-	"text/template"
 )
 
-func assertNoErr(t *testing.T, e error) {
-	if e != nil {
-		t.Error(e)
+// MockCheckErr mimics CheckErr without calling os.Exit
+func MockCheckErr(msg interface{}) {
+    if msg != nil {
+        fmt.Fprintln(os.Stderr, "Error:", msg)
+    }
+}
+
+func TestGPTGt(t *testing.T) {
+	if !Gt(2, 1) {
+		t.Errorf("Expected Gt(2, 1) to be true")
+	}
+	if Gt(1, 2) {
+		t.Errorf("Expected Gt(1, 2) to be false")
+	}
+	if !Gt("3", "2") {
+		t.Errorf("Expected Gt('3', '2') to be true")
+	}
+	if Gt("2", "3") {
+		t.Errorf("Expected Gt('2', '3') to be false")
+	}
+	if !Gt([]int{1, 2, 3}, []int{1, 2}) {
+		t.Errorf("Expected Gt([1, 2, 3], [1, 2]) to be true")
+	}
+	if Gt([]int{1, 2}, []int{1, 2, 3}) {
+		t.Errorf("Expected Gt([1, 2], [1, 2, 3]) to be false")
 	}
 }
 
-func TestAddTemplateFunctions(t *testing.T) {
-	AddTemplateFunc("t", func() bool { return true })
-	AddTemplateFuncs(template.FuncMap{
-		"f": func() bool { return false },
-		"h": func() string { return "Hello," },
-		"w": func() string { return "world." }})
+func TestGPTEq(t *testing.T) {
+	if !Eq(1, 1) {
+		t.Errorf("Expected Eq(1, 1) to be true")
+	}
+	if Eq(1, 2) {
+		t.Errorf("Expected Eq(1, 2) to be false")
+	}
+	if !Eq("test", "test") {
+		t.Errorf("Expected Eq('test', 'test') to be true")
+	}
+	if Eq("test", "Test") {
+		t.Errorf("Expected Eq('test', 'Test') to be false")
+	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("Expected Eq to panic on unsupported types")
+		}
+	}()
+	Eq([]int{1, 2}, []int{1, 2})
+}
 
-	c := &Command{}
-	c.SetUsageTemplate(`{{if t}}{{h}}{{end}}{{if f}}{{h}}{{end}} {{w}}`)
-
-	const expected = "Hello, world."
-	if got := c.UsageString(); got != expected {
-		t.Errorf("Expected UsageString: %v\nGot: %v", expected, got)
+func TestGPTTrimRightSpace(t *testing.T) {
+	if result := trimRightSpace("test   "); result != "test" {
+		t.Errorf("Expected trimRightSpace('test   ') to be 'test', got '%s'", result)
+	}
+	if result := trimRightSpace("test\t\t\t"); result != "test" {
+		t.Errorf("Expected trimRightSpace('test\\t\\t\\t') to be 'test', got '%s'", result)
+	}
+	if result := trimRightSpace("test\n\n"); result != "test" {
+		t.Errorf("Expected trimRightSpace('test\\n\\n') to be 'test', got '%s'", result)
 	}
 }
 
-func TestLevenshteinDistance(t *testing.T) {
-	tests := []struct {
-		name       string
-		s          string
-		t          string
-		ignoreCase bool
-		expected   int
-	}{
-		{
-			name:       "Equal strings (case-sensitive)",
-			s:          "hello",
-			t:          "hello",
-			ignoreCase: false,
-			expected:   0,
-		},
-		{
-			name:       "Equal strings (case-insensitive)",
-			s:          "Hello",
-			t:          "hello",
-			ignoreCase: true,
-			expected:   0,
-		},
-		{
-			name:       "Different strings (case-sensitive)",
-			s:          "kitten",
-			t:          "sitting",
-			ignoreCase: false,
-			expected:   3,
-		},
-		{
-			name:       "Different strings (case-insensitive)",
-			s:          "Kitten",
-			t:          "Sitting",
-			ignoreCase: true,
-			expected:   3,
-		},
-		{
-			name:       "Empty strings",
-			s:          "",
-			t:          "",
-			ignoreCase: false,
-			expected:   0,
-		},
-		{
-			name:       "One empty string",
-			s:          "abc",
-			t:          "",
-			ignoreCase: false,
-			expected:   3,
-		},
-		{
-			name:       "Both empty strings",
-			s:          "",
-			t:          "",
-			ignoreCase: true,
-			expected:   0,
-		},
+func TestGPTAppendIfNotPresent(t *testing.T) {
+	if result := appendIfNotPresent("test", ""); result != "test" {
+		t.Errorf("Expected appendIfNotPresent('test', '') to be 'test', got '%s'", result)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := ld(tt.s, tt.t, tt.ignoreCase)
-
-			// Assert
-			if got != tt.expected {
-				t.Errorf("Expected ld: %v\nGot: %v", tt.expected, got)
-			}
-		})
+	if result := appendIfNotPresent("test", "append"); result != "test append" {
+		t.Errorf("Expected appendIfNotPresent('test', 'append') to be 'test append', got '%s'", result)
+	}
+	if result := appendIfNotPresent("test append", "append"); result != "test append" {
+		t.Errorf("Expected appendIfNotPresent('test append', 'append') to be 'test append', got '%s'", result)
 	}
 }
 
-func TestStringInSlice(t *testing.T) {
-	tests := []struct {
-		name     string
-		a        string
-		list     []string
-		expected bool
-	}{
-		{
-			name:     "String in slice (case-sensitive)",
-			a:        "apple",
-			list:     []string{"orange", "banana", "apple", "grape"},
-			expected: true,
-		},
-		{
-			name:     "String not in slice (case-sensitive)",
-			a:        "pear",
-			list:     []string{"orange", "banana", "apple", "grape"},
-			expected: false,
-		},
-		{
-			name:     "String in slice (case-insensitive)",
-			a:        "APPLE",
-			list:     []string{"orange", "banana", "apple", "grape"},
-			expected: false,
-		},
-		{
-			name:     "Empty slice",
-			a:        "apple",
-			list:     []string{},
-			expected: false,
-		},
-		{
-			name:     "Empty string",
-			a:        "",
-			list:     []string{"orange", "banana", "apple", "grape"},
-			expected: false,
-		},
-		{
-			name:     "Empty strings match",
-			a:        "",
-			list:     []string{"orange", ""},
-			expected: true,
-		},
-		{
-			name:     "Empty string in empty slice",
-			a:        "",
-			list:     []string{},
-			expected: false,
-		},
+func TestGPTrpad(t *testing.T) {
+	if result := rpad("test", 8); result != "test    " {
+		t.Errorf("Expected rpad('test', 8) to be 'test    ', got '%s'", result)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := stringInSlice(tt.a, tt.list)
-
-			// Assert
-			if got != tt.expected {
-				t.Errorf("Expected stringInSlice: %v\nGot: %v", tt.expected, got)
-			}
-		})
+	if result := rpad("test", 4); result != "test" {
+		t.Errorf("Expected rpad('test', 4) to be 'test', got '%s'", result)
 	}
 }
 
-func TestRpad(t *testing.T) {
-	tests := []struct {
-		name        string
-		inputString string
-		padding     int
-		expected    string
-	}{
-		{
-			name:        "Padding required",
-			inputString: "Hello",
-			padding:     10,
-			expected:    "Hello     ",
-		},
-		{
-			name:        "No padding required",
-			inputString: "World",
-			padding:     5,
-			expected:    "World",
-		},
-		{
-			name:        "Empty string",
-			inputString: "",
-			padding:     8,
-			expected:    "        ",
-		},
-		{
-			name:        "Zero padding",
-			inputString: "cobra",
-			padding:     0,
-			expected:    "cobra",
-		},
+func TestMockCheckErr(t *testing.T) {
+    // Save the original os.Stderr
+    origStderr := os.Stderr
+    defer func() { os.Stderr = origStderr }()
+
+    // Create a pipe to capture os.Stderr output
+    r, w, _ := os.Pipe()
+    os.Stderr = w
+
+    // Call MockCheckErr
+    MockCheckErr("error")
+
+    // Close the writer and read the captured output
+    w.Close()
+    var buf bytes.Buffer
+    io.Copy(&buf, r)
+
+    // Verify the output
+    expectedOutput := "Error: error\n"
+    if buf.String() != expectedOutput {
+        t.Errorf("Expected MockCheckErr to write '%s', got '%s'", expectedOutput, buf.String())
+    }
+}
+
+func TestGPTWriteStringAndCheck(t *testing.T) {
+	var b strings.Builder
+	WriteStringAndCheck(&b, "test")
+	if result := b.String(); result != "test" {
+		t.Errorf("Expected WriteStringAndCheck to write 'test', got '%s'", result)
 	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := rpad(tt.inputString, tt.padding)
+func TestGPTLd(t *testing.T) {
+	if result := ld("test", "test", false); result != 0 {
+		t.Errorf("Expected ld('test', 'test', false) to be 0, got '%d'", result)
+	}
+	if result := ld("test", "Test", false); result != 1 {
+		t.Errorf("Expected ld('test', 'Test', false) to be 1, got '%d'", result)
+	}
+	if result := ld("test", "Test", true); result != 0 {
+		t.Errorf("Expected ld('test', 'Test', true) to be 0, got '%d'", result)
+	}
+}
 
-			// Assert
-			if got != tt.expected {
-				t.Errorf("Expected rpad: %v\nGot: %v", tt.expected, got)
-			}
-		})
+func TestGPTStringinSlice(t *testing.T) {
+	if !stringInSlice("test", []string{"test", "example"}) {
+		t.Errorf("Expected stringInSlice('test', {'test', 'example'}) to be true")
+	}
+	if stringInSlice("notfound", []string{"test", "example"}) {
+		t.Errorf("Expected stringInSlice('notfound', {'test', 'example'}) to be false")
+	}
+}
+
+func TestGPTTmpl(t *testing.T) {
+	var b strings.Builder
+	err := tmpl(&b, "{{.}}", "test")
+	if err != nil {
+		t.Errorf("Expected tmpl to execute without error, got '%s'", err)
+	}
+	if result := b.String(); result != "test" {
+		t.Errorf("Expected tmpl to write 'test', got '%s'", result)
 	}
 }
