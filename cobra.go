@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
 	"text/template"
 	"time"
 	"unicode"
@@ -39,6 +40,7 @@ var templateFuncs = template.FuncMap{
 	"eq":                      Eq,
 }
 
+
 var initializers []func()
 var finalizers []func()
 
@@ -48,7 +50,7 @@ const (
 	defaultCaseInsensitive  = false
 	defaultTraverseRunHooks = false
 )
-
+var osExit = os.Exit
 // EnablePrefixMatching allows setting automatic prefix matching. Automatic prefix matching can be a dangerous thing
 // to automatically enable in CLI tools.
 // Set this to true to enable it.
@@ -231,7 +233,7 @@ func stringInSlice(a string, list []string) bool {
 func CheckErr(msg interface{}) {
 	if msg != nil {
 		fmt.Fprintln(os.Stderr, "Error:", msg)
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
